@@ -1,0 +1,7 @@
+{
+  "vendor/agent_core/harness.py": "219691162b9f09b8e544acaff6a39ac613ba2027d5b2ba9b2713875934ea8da5",
+  "vendor/agent_core/song_catalog.py": "57d257d1084a67271a78a3b79393839c1442d37499c8a25862d80071a411e49e",
+  "vendor/agent_core/voice_text.py": "c652a1b868029a5f1d46b23e1720af44363081ce441c1ff008bcc86f913e4da8",
+  "vendor/agent_core/data/luotianyi_original_songs.json": "22552757d32c86e1bf9d52217c3c3ff588bd35a86ba1ceada6707198f2710f8d",
+  "acceptance/evals/scenarios.json": "01ed805ae688e431a8f09bf64d21d445cdf26e85843c6fd9d08b58332df42e67"
+}
