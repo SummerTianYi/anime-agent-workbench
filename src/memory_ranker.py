@@ -168,3 +168,63 @@ def concept_bridge(query: str, fact: str) -> float:
     if not contributions:
         return 0.0
     return sum(contributions) / len(contributions)
+
+
+# 偏好/断言谓词：对稳定属性的显式声明证据
+PREFERENCE_MARKERS: tuple[str, ...] = (
+    "最喜欢", "喜欢", "希望", "热爱", "偏好", "讨厌", "不吃", "只想",
+)
+
+# 时态标记：短期状态/临时行为的信号词。
+# 「刚」是单字，会误伤「刚才/金刚」类词——已知噪声，只在稳定属性
+# 提问下生效，影响面可控，换双字词会漏掉「刚换/刚养」这类真实表达。
+TRANSIENT_MARKERS: tuple[str, ...] = (
+    "最近", "这几天", "今天", "昨天", "刚", "正在", "临时",
+)
+
+
+def _marker_count(text: str, markers: tuple[str, ...]) -> int:
+    return sum(1 for marker in markers if marker in text)
+
+
+def _is_stable_attribute_query(query: str) -> bool:
+    """Gate for L4/L5: does the query ask for a stable attribute?
+
+    Contract: raw query in -> bool out. True iff the normalized query
+    contains at least one CONCEPT_LEXICON head word (爱好/职业/城市/…).
+    行为式提问（「周末一般干嘛」）不含 head 词，L4/L5 对它们保持静默。
+    """
+    q = normalize(query)
+    return any(head in q for concept in CONCEPT_LEXICON.values() for head in concept.head)
+
+
+def preference_bonus(query: str, fact: str) -> float:
+    """L4: explicit preference assertions earn extra evidence, conditionally.
+
+    Contract: raw query+fact in -> float in [0.0, 1.0] out. Non-zero only
+    when (a) the query is a stable-attribute question and (b) the fact
+    carries a preference predicate (喜欢/希望/讨厌/…). Design rationale:
+    「喜欢 X」是对偏好的显式断言，而「在 X」只陈述行为；问「爱好/称呼」
+    这类稳定属性时，前者才是更强的证据。饱和计数（min(count,2)/2）：
+    多个谓词叠加只小幅增信，防止堆词刷分。
+    """
+    if not _is_stable_attribute_query(query):
+        return 0.0
+    hits = _marker_count(normalize(fact), PREFERENCE_MARKERS)
+    return min(hits, 2) / 2.0
+
+
+def transient_penalty(query: str, fact: str) -> float:
+    """L5: short-term states get demoted, under the same stable-query gate.
+
+    Contract: raw query+fact in -> float in [0.0, 1.0] out (subtracted from
+    the final score by score()). Non-zero only when the query asks for a
+    stable attribute AND the fact carries a tense marker (最近/今天/刚/…).
+    Design rationale: 查询「用户的爱好/职业」问的是稳定属性，带时态标记
+    的事实是短期状态，不该抢占稳定属性的召回位；反之问「最近干嘛」时
+    这些事实恰恰对题，所以门控必须双向生效。
+    """
+    if not _is_stable_attribute_query(query):
+        return 0.0
+    hits = _marker_count(normalize(fact), TRANSIENT_MARKERS)
+    return min(hits, 2) / 2.0

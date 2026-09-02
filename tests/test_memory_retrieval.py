@@ -158,5 +158,58 @@ class ConceptBridgeTests(unittest.TestCase):
             )
 
 
+class PreferenceBonusTests(unittest.TestCase):
+    """L4: preference assertions strengthen stable-attribute evidence only."""
+
+    def test_marker_in_fact_scores_under_stable_query(self):
+        # 「用户的爱好」是稳定属性提问（含 head 词「爱好」），
+        # 「喜欢」类调词是偏好的显式断言，应加分
+        self.assertGreater(mr.preference_bonus("用户的爱好", "用户周末喜欢徒步"), 0.0)
+        self.assertGreater(mr.preference_bonus("怎么称呼用户", "用户希望被称呼为老板"), 0.0)
+
+    def test_no_effect_for_non_stable_query(self):
+        # 查询不含任何 head 词（问的是行为而非属性）时，L4 必须静默：
+        # 否则闲聊查询也会被带偏好词的事实抢位
+        self.assertEqual(mr.preference_bonus("用户周末一般干嘛", "用户周末喜欢徒步"), 0.0)
+
+    def test_marker_free_fact_scores_zero(self):
+        self.assertEqual(mr.preference_bonus("用户的爱好", "用户是后端工程师"), 0.0)
+
+    def test_saturates_at_one(self):
+        score = mr.preference_bonus("用户的爱好", "用户最喜欢也最热爱徒步")
+        self.assertGreater(score, 0.0)
+        self.assertLessEqual(score, 1.0)
+
+
+class TransientPenaltyTests(unittest.TestCase):
+    """L5: tense markers demote short-term states under stable queries only."""
+
+    def test_marker_in_fact_penalized_under_stable_query(self):
+        # golden 把「用户最近在健身」排除在「用户的爱好」正确答案外：
+        # 稳定属性提问下，带时态标记的短期状态应被降权
+        self.assertGreater(mr.transient_penalty("用户的爱好", "用户最近在健身"), 0.0)
+        self.assertGreater(mr.transient_penalty("用户的职业", "用户今天在公司加班"), 0.0)
+
+    def test_no_effect_for_non_stable_query(self):
+        # 非稳定属性提问（不含 head 词）时不扣分：问「最近干嘛」时
+        # 带「最近」的事实恰恰是对题的，不该被惩罚
+        self.assertEqual(mr.transient_penalty("用户周末一般干嘛", "用户最近在健身"), 0.0)
+
+    def test_marker_free_fact_scores_zero(self):
+        self.assertEqual(mr.transient_penalty("用户的爱好", "用户周末喜欢徒步"), 0.0)
+
+    def test_saturates_at_one(self):
+        score = mr.transient_penalty("用户的爱好", "用户最近今天一直在健身")
+        self.assertGreater(score, 0.0)
+        self.assertLessEqual(score, 1.0)
+
+    def test_stable_gate_keys_on_head_words(self):
+        # 门控判定暴露为私有函数以便直接测：head 词命中即稳定属性提问
+        self.assertTrue(mr._is_stable_attribute_query("用户的爱好"))
+        self.assertTrue(mr._is_stable_attribute_query("用户在哪座城市"))
+        self.assertFalse(mr._is_stable_attribute_query("用户周末一般干嘛"))
+        self.assertFalse(mr._is_stable_attribute_query(""))
+
+
 if __name__ == "__main__":
     unittest.main()
