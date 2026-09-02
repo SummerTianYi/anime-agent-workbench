@@ -15,6 +15,7 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from src import memory_ranker as mr  # noqa: E402
+from src.memory_store import MemoryStore, format_memory_prompt  # noqa: E402
 
 # GOLDEN 直接 import 冻结闸门而非复制，避免两份数据静默失同步；
 # acceptance.gates 无 __init__.py，靠命名空间包机制导入（test_workbench 同法）
@@ -298,6 +299,85 @@ class ScoreRetrievalTests(unittest.TestCase):
         golden = [{"query": "用户的宠物", "stored": ["用户养了一只猫"], "relevant": []}]
         result = mr.score_retrieval(golden)
         self.assertEqual(result["recall"], 0.0)
+
+
+class RecallRelevantTests(unittest.TestCase):
+    """存储层集成：检索必须继承 recall() 的 scope 语义（session+global）。"""
+
+    def setUp(self):
+        self.store = MemoryStore()
+        self.addCleanup(self.store.close)
+        self.store.add("用户最喜欢的颜色是蓝色", session_id=1)
+        self.store.add("用户在杭州工作", session_id=1)
+        self.store.add("全局事实：用户希望被称呼为老板", session_id=999, scope="global")
+        self.store.add("用户养了一只猫", session_id=2)
+
+    def test_ranks_by_query_relevance(self):
+        facts = self.store.recall_relevant(session_id=1, query="用户喜欢什么颜色")
+        self.assertEqual(facts[0].fact, "用户最喜欢的颜色是蓝色")
+
+    def test_limit_caps_result(self):
+        facts = self.store.recall_relevant(session_id=1, query="用户喜欢什么颜色", limit=2)
+        self.assertEqual(len(facts), 2)
+
+    def test_global_facts_visible(self):
+        facts = self.store.recall_relevant(session_id=1, query="怎么称呼用户")
+        self.assertEqual(facts[0].fact, "全局事实：用户希望被称呼为老板")
+
+    def test_session_isolation(self):
+        # 跨会话零泄漏是 SPEC 硬指标：session 1 无论怎么查都拿不到
+        # session 2 的行，即使查询与那条事实高度相关
+        facts = self.store.recall_relevant(session_id=1, query="用户养的宠物")
+        self.assertNotIn("用户养了一只猫", [f.fact for f in facts])
+
+    def test_empty_query_returns_recent_first(self):
+        # 空查询无检索意图，退化为新近优先（与 recall() 默认序一致），
+        # 但 scope 过滤仍生效
+        facts = self.store.recall_relevant(session_id=1, query="", limit=2)
+        self.assertEqual(len(facts), 2)
+        self.assertNotIn("用户养了一只猫", [f.fact for f in facts])
+
+    def test_returns_memory_fact_objects(self):
+        from src.memory_store import MemoryFact
+
+        facts = self.store.recall_relevant(session_id=1, query="用户的职业")
+        self.assertTrue(all(isinstance(f, MemoryFact) for f in facts))
+
+
+class FormatMemoryPromptTests(unittest.TestCase):
+    """prompt 片段格式化：直接作 extra_system 拼接的中文文本。"""
+
+    def _fact(self, text: str, fact_id: int = 1) -> object:
+        from src.memory_store import MemoryFact
+
+        return MemoryFact(
+            fact_id=fact_id, session_id=1, scope="session", fact=text, source_request_id=""
+        )
+
+    def test_empty_list_returns_empty_string(self):
+        self.assertEqual(format_memory_prompt([]), "")
+
+    def test_single_fact(self):
+        prompt = format_memory_prompt([self._fact("用户最喜欢的颜色是蓝色")])
+        self.assertIn("【已知记忆】", prompt)
+        self.assertIn("用户最喜欢的颜色是蓝色", prompt)
+        # 面向 LLM 的字符串用中文全角标点，与 BASE_SYSTEM_PROMPT 文风一致
+        self.assertNotIn(",", prompt)
+        self.assertNotIn(":", prompt)
+
+    def test_multiple_facts_keep_order(self):
+        prompt = format_memory_prompt(
+            [self._fact("用户最喜欢的颜色是蓝色", 2), self._fact("用户在杭州工作", 1)]
+        )
+        self.assertLess(prompt.index("用户最喜欢的颜色是蓝色"), prompt.index("用户在杭州工作"))
+
+    def test_no_internal_metadata_leaks(self):
+        # fact_id / session_id / scope / source_request_id 是存储内部元数据，
+        # 泄进 prompt 只会浪费上下文并可能误导模型
+        prompt = format_memory_prompt([self._fact("用户在杭州工作", 42)])
+        self.assertNotIn("42", prompt)
+        self.assertNotIn("session", prompt)
+        self.assertNotIn("scope", prompt)
 
 
 if __name__ == "__main__":
