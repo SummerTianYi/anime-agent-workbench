@@ -170,6 +170,14 @@ def concept_bridge(query: str, fact: str) -> float:
     return sum(contributions) / len(contributions)
 
 
+# 合成权重：全局常量，禁止按样例逐条调参；扰动敏感性分析见
+# evidence/task_b_retrieval_analysis.md。
+W_BIGRAM = 0.30
+W_CONCEPT = 0.55
+W_PREFERENCE = 0.10
+W_TRANSIENT = 0.35
+
+
 # 偏好/断言谓词：对稳定属性的显式声明证据
 PREFERENCE_MARKERS: tuple[str, ...] = (
     "最喜欢", "喜欢", "希望", "热爱", "偏好", "讨厌", "不吃", "只想",
@@ -228,3 +236,69 @@ def transient_penalty(query: str, fact: str) -> float:
         return 0.0
     hits = _marker_count(normalize(fact), TRANSIENT_MARKERS)
     return min(hits, 2) / 2.0
+
+
+def score(query: str, fact: str) -> float:
+    """Compose the five layers into one relevance score.
+
+    Contract: raw query+fact in -> float out (may be negative when L5 fires
+    hard). score = W_BIGRAM*L2 + W_CONCEPT*L3 + W_PREFERENCE*L4 -
+    W_TRANSIENT*L5. The weights are module-level constants on purpose:
+    per-example tuning would turn the lexicon into golden-set camouflage.
+    """
+    return (
+        W_BIGRAM * bigram_similarity(query, fact)
+        + W_CONCEPT * concept_bridge(query, fact)
+        + W_PREFERENCE * preference_bonus(query, fact)
+        - W_TRANSIENT * transient_penalty(query, fact)
+    )
+
+
+def rank(query: str, candidates: list[str]) -> list[tuple[str, float]]:
+    """Order candidates by relevance, keeping the full list.
+
+    Contract: raw query + candidate facts in -> [(fact, score), ...] out,
+    descending by score. Ties keep input order (list.sort is stable), so
+    results are reproducible across runs. Callers wanting top-k slice the
+    result; score_retrieval and MemoryStore.recall_relevant both take top-1.
+    """
+    scored = [(candidate, score(query, candidate)) for candidate in candidates]
+    scored.sort(key=lambda pair: pair[1], reverse=True)
+    return scored
+
+
+def score_retrieval(golden: list[dict]) -> dict[str, float]:
+    """Evaluate top-1 retrieval quality against a golden set.
+
+    Contract: list of {"query": str, "stored": [facts...], "relevant":
+    [facts...]} in -> {"precision": float, "recall": float} out (both keys
+    always present; the gate reads them with .get(key, 0), so a missing key
+    would silently score zero).
+
+    口径（与 g1_memory 判定一致）：
+      - 检索策略 top-1：每条查询只取分数最高的一条。真实用途是往
+        extra_system 注入一条最相关记忆，且评测集 relevant 恒为单项；
+        需要 top-k 的调用方直接用 rank()。
+      - 单条：precision_i = |retrieved ∩ relevant| / |retrieved|（retrieved
+        为空记 0.0）；recall_i = |retrieved ∩ relevant| / |relevant|
+        （relevant 为空记 0.0，确定性口径，评测集不应出现此形状）。
+      - 汇总：宏平均（macro），mean(precision_i) / mean(recall_i)。
+      - 空 golden 集：无样本可评，两指标均记 0.0。
+    """
+    if not golden:
+        return {"precision": 0.0, "recall": 0.0}
+    precisions: list[float] = []
+    recalls: list[float] = []
+    for item in golden:
+        query = str(item.get("query", ""))
+        stored = [str(fact) for fact in item.get("stored", [])]
+        relevant = {str(fact) for fact in item.get("relevant", [])}
+        ranked = rank(query, stored)
+        retrieved = {ranked[0][0]} if ranked else set()
+        hits = len(retrieved & relevant)
+        precisions.append(hits / len(retrieved) if retrieved else 0.0)
+        recalls.append(hits / len(relevant) if relevant else 0.0)
+    return {
+        "precision": sum(precisions) / len(precisions),
+        "recall": sum(recalls) / len(recalls),
+    }

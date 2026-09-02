@@ -211,5 +211,94 @@ class TransientPenaltyTests(unittest.TestCase):
         self.assertFalse(mr._is_stable_attribute_query(""))
 
 
+class ScoreCompositionTests(unittest.TestCase):
+    """合成层：四层信号按全局权重线性叠加。"""
+
+    def test_matches_layer_formula(self):
+        query, fact = "用户的爱好", "用户周末喜欢徒步"
+        expected = (
+            mr.W_BIGRAM * mr.bigram_similarity(query, fact)
+            + mr.W_CONCEPT * mr.concept_bridge(query, fact)
+            + mr.W_PREFERENCE * mr.preference_bonus(query, fact)
+            - mr.W_TRANSIENT * mr.transient_penalty(query, fact)
+        )
+        self.assertAlmostEqual(mr.score(query, fact), expected, places=12)
+
+    def test_transient_marker_lowers_score_under_stable_query(self):
+        plain = mr.score("用户的爱好", "用户周末喜欢徒步")
+        transient = mr.score("用户的爱好", "用户最近喜欢徒步")
+        self.assertGreater(plain, transient)
+
+    def test_preference_assertion_raises_score_under_stable_query(self):
+        with_marker = mr.score("用户的爱好", "用户喜欢徒步")
+        without = mr.score("用户的爱好", "用户周末徒步")
+        self.assertGreater(with_marker, without)
+
+
+class RankTests(unittest.TestCase):
+    """排序层：降序 + 同分按原序（稳定排序）+ 全量返回。"""
+
+    def test_descending_by_score(self):
+        ranked = mr.rank("用户养的宠物", ["用户最喜欢的颜色是蓝色", "用户养了一只猫"])
+        self.assertEqual(ranked[0][0], "用户养了一只猫")
+        self.assertGreaterEqual(ranked[0][1], ranked[1][1])
+
+    def test_stable_tie_keeps_input_order(self):
+        # 两条同分事实必须按入参原序返回，保证结果可复现可测试
+        ranked = mr.rank("无关提问", ["事实甲", "事实乙", "事实丙"])
+        self.assertEqual([text for text, _ in ranked], ["事实甲", "事实乙", "事实丙"])
+        self.assertEqual(len({s for _, s in ranked}), 1)
+
+    def test_returns_full_list_with_scores(self):
+        candidates = ["用户是后端工程师", "用户最近在健身", "用户周末喜欢徒步"]
+        ranked = mr.rank("用户的爱好", candidates)
+        self.assertEqual(len(ranked), 3)
+        self.assertEqual({text for text, _ in ranked}, set(candidates))
+        for _, value in ranked:
+            self.assertIsInstance(value, float)
+
+    def test_empty_candidates(self):
+        self.assertEqual(mr.rank("用户的爱好", []), [])
+
+    def test_golden_hard_pair_prefers_stable_hobby(self):
+        # golden 最难对：稳定爱好断言必须压过带时态标记的短期健身
+        ranked = mr.rank("用户的爱好", ["用户是后端工程师", "用户最近在健身", "用户周末喜欢徒步"])
+        self.assertEqual(ranked[0][0], "用户周末喜欢徒步")
+
+
+class ScoreRetrievalTests(unittest.TestCase):
+    """评测口径：top-1 检索 + 宏平均查准/查全（与 g1_memory 同口径）。"""
+
+    def test_golden_set_reaches_threshold(self):
+        result = mr.score_retrieval(GOLDEN)
+        self.assertIsInstance(result, dict)
+        self.assertIsInstance(result["precision"], float)
+        self.assertIsInstance(result["recall"], float)
+        self.assertGreaterEqual(result["precision"], 0.8)
+        self.assertGreaterEqual(result["recall"], 0.8)
+
+    def test_holdout_set_reaches_threshold(self):
+        # 留出集不达标即视为过拟合；不许改数据迁就实现
+        result = mr.score_retrieval(HOLDOUT_GOLDEN)
+        self.assertGreaterEqual(result["precision"], 0.8)
+        self.assertGreaterEqual(result["recall"], 0.8)
+
+    def test_perfect_small_set_scores_one(self):
+        golden = [
+            {"query": "用户养的宠物", "stored": ["用户养了一只猫"], "relevant": ["用户养了一只猫"]},
+            {"query": "用户的职业", "stored": ["用户是后端工程师"], "relevant": ["用户是后端工程师"]},
+        ]
+        result = mr.score_retrieval(golden)
+        self.assertAlmostEqual(result["precision"], 1.0)
+        self.assertAlmostEqual(result["recall"], 1.0)
+
+    def test_empty_relevant_counts_zero_per_convention(self):
+        # 口径约定：relevant 为空时该条 recall 记 0.0（评测集不应出现，
+        # 但口径必须确定性）
+        golden = [{"query": "用户的宠物", "stored": ["用户养了一只猫"], "relevant": []}]
+        result = mr.score_retrieval(golden)
+        self.assertEqual(result["recall"], 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()
