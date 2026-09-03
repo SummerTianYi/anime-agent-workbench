@@ -447,5 +447,94 @@ class LexiconMaskingInvariantTests(unittest.TestCase):
         self.assertEqual(dupes, {}, f"这些类有重复成员：{dupes}")
 
 
+# 规则原文（RC-4，可在不看任何评测集的前提下独立复述）：
+#   极性谓词 = 极性前缀 + 单字活动动词 V。
+#     事实侧否定前缀「不」，事实侧肯定前缀「爱」；
+#     查询侧否定取向另有「不能 + V」与「V + 不了」两个构式。
+#   V 的选取标准：汉语里能直接跟在「不/爱」后面构成偏好陈述的日常单字活动动词。
+# 这条规则**在实现里已经有实例**：NEGATIVE_MARKERS 收了「不吃」、POSITIVE_MARKERS
+# 收了「爱吃」、QUERY_NEGATIVE_MARKERS 收了「不能吃」与「吃不了」。所以本组测试要求
+# 的是补全一条既有规则的产物集，而不是为某一对失败发明一条新规则——后者正是
+# 任务书禁止的 Goodhart 形态。动词元组在本文件里独立写一遍是刻意的：测试是规则的
+# 外部陈述，实现里那份是规则的产物，两份漂移时本组测试就会红。
+_POLARITY_VERBS = (
+    "吃", "喝", "玩", "看", "去", "用", "碰", "穿", "戴",
+    "试", "尝", "买", "听", "抽", "唱", "画", "读", "跑",
+)
+
+
+class PolarityVerbRuleTests(unittest.TestCase):
+    """RC-4：极性标记词表只收了「吃」一个动词，规则的其他产物全部缺席。
+
+    diagnose 实测（v2 #7）：query「用户喜欢喝什么饮品」polarity=+1（RC-5 已修好），
+    干扰项「用户不喝酒」与正确答案「用户每天早上要喝一杯手冲咖啡」在 L3/L5 上都为 0，
+    L4 本应是唯一的判别层，但「不喝」不在 NEGATIVE_MARKERS 里，于是 `_polarity_hits`
+    给出 (0,0)、L4 对这条**明确的否定陈述**完全静默，胜负落回 L2 的长度偏置
+    （干扰 5 字 L2=0.1768 vs 答案 14 字 L2=0.0981），干扰项抢到 top-1。
+
+    原则性依据不需要 v2：「不吃」与「不吃香菜」在汉语里是同一种构词，表里承认前者
+    却漏掉后者，没有任何语言学依据。补全规则产物后实测（三集，本机）：golden 8/8、
+    v1 12/12 均零翻转，v2 23/32 -> 24/32（只翻转 #7，且命中对最小分差 0.0067 不变）。
+    反 Goodhart 审计：规则产出 34 个新词（不+V 17 个、爱+V 17 个），其中恰好落在 v2
+    里的只有「不喝」1 个，占比 0.029；另外 33 个在三个集合计 100 对上**零翻转**——
+    这一点是本组测试存在的意义：如果只加「不喝」，它与「看哪对失败就补哪个词」在
+    代码上无法区分。
+    """
+
+    def test_every_negated_verb_is_a_negative_polarity_marker(self):
+        """「不 + V」的每一个产物都必须被读成一条否定极性证据。"""
+        for verb in _POLARITY_VERBS:
+            text = mr.normalize(f"用户不{verb}这个")
+            self.assertEqual(
+                mr._polarity_hits(text), (0, 1),
+                f"「不{verb}」没被 NEGATIVE_MARKERS 认出：规则产物集不完整",
+            )
+
+    def test_every_affirmative_verb_is_a_positive_polarity_marker(self):
+        """「爱 + V」的每一个产物都必须被读成一条肯定极性证据。
+
+        这一侧在三个评测集上实测零翻转（17 个新词全是惰性的）。仍然要补，理由是
+        两张表必须对同一个动词集对称：只有否定侧补全的表会让「用户爱喝手冲咖啡」
+        读作中性而「用户不喝酒」读作否定，L4 的带符号语义就偏向否定事实。
+        """
+        for verb in _POLARITY_VERBS:
+            text = mr.normalize(f"用户爱{verb}这个")
+            self.assertEqual(
+                mr._polarity_hits(text), (1, 0),
+                f"「爱{verb}」没被 POSITIVE_MARKERS 认出：两张表对动词集不对称",
+            )
+
+    def test_query_side_negative_orientation_covers_every_verb(self):
+        """查询侧的「不能 + V」与「V + 不了」都必须把取向判成 -1。
+
+        现状只认「不能吃」与「吃不了」，于是「用户不能喝什么」的 polarity 落到 0，
+        L4 对整条查询静默——与 RC-5 修掉的缺口同形，只是发生在否定侧。这两个构式的
+        34 个产物在 v2 里一个都没出现（占比 0.000）、在三个集上零翻转，补它买不到
+        任何分数；补的理由纯粹是规则不完整，而这条自检用的探针句是合成的，不来自
+        任何评测集。
+        """
+        for verb in _POLARITY_VERBS:
+            for probe in (f"用户不能{verb}", f"用户{verb}不了"):
+                self.assertEqual(
+                    mr._query_context(probe).polarity, -1,
+                    f"查询「{probe}」的取向没被判成负向：QUERY_NEGATIVE_MARKERS 不完整",
+                )
+
+    def test_an_explicit_negation_is_penalised_on_a_positive_preference_query(self):
+        """正向偏好提问下，明确的否定陈述必须拿负分，而不是与中性事实同分。
+
+        这是 RC-4 的行为级形态，与上面三条的标记级形态互为验证：标记级测「词被认出
+        了」，本条测「认出来之后 L4 真的按符号用了它」。红的时候它返回 0.0，正是
+        「L4 对否定事实静默」这一缺陷本身。
+        """
+        query = "用户喜欢喝什么饮品"
+        self.assertEqual(mr._query_context(query).polarity, 1, "前置条件：RC-5 应已让本查询取正向")
+        self.assertLess(
+            mr.preference_bonus(query, "用户不喝酒"), 0.0,
+            "L4 对「不喝酒」静默：否定事实与中性事实同分，正向提问下它靠 L2 长度优势抢位",
+        )
+        self.assertEqual(mr.preference_bonus(query, "用户每天早上要喝一杯手冲咖啡"), 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()
