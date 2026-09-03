@@ -297,7 +297,12 @@ def _polarity_from_normalized(normalized: str, stable: bool) -> int:
     """
     if _masked_hits(normalized, QUERY_NEGATIVE_MARKERS):
         return -1
-    if stable or _masked_hits(normalized, POSITIVE_MARKERS):
+    affirmative = _masked_scan(normalized, POSITIVE_MARKERS)
+    if any(_negated(normalized, word) for word in affirmative):
+        # 查询侧的同一条辖域规则：「用户不爱吃什么」问的是负向约束，不能因为
+        # 含子串「爱吃」就判成正向——那会让 L4 奖励与提问方向相反的事实。
+        return -1
+    if stable or affirmative:
         return 1
     return 0
 
@@ -415,16 +420,62 @@ W_TRANSIENT = 0.35
 # 注入 extra_system 即语义反转，LLM 会据此以为用户喜欢运动。
 # NEGATIVE_MARKERS 收「过敏」而不只「过敏于」：「用户对海鲜过敏」是负面约束
 # 断言最典型的表达形式，也是忌口类提问最对题的证据。
-POSITIVE_MARKERS: tuple[str, ...] = (
-    "最喜欢", "喜欢", "希望", "热爱", "偏好", "爱吃", "感兴趣", "只想",
+# 极性谓词的构词规则（诊断 RC-4）：极性前缀 + 单字活动动词。
+#   事实侧否定前缀「不」，事实侧肯定前缀「爱」；
+#   查询侧否定取向另有「不能 + V」与「V + 不了」两个构式。
+# 这条规则在旧表里**已经各有实例**（否定侧「不吃」、肯定侧「爱吃」、查询侧
+# 「不能吃」与「吃不了」），所以下面三张表做的是补全一条既有规则的产物集，
+# 不是新增语义、也不是照着某一对失败补词。动词集的选取标准可以在不看任何
+# 评测集的前提下复述：汉语里能直接跟在「不/爱」后面构成偏好陈述的日常单字
+# 活动动词。刻意不收「闻」「睡」这类——它们构成的「不闻」「不睡」陈述的是
+# 生理状态而不是偏好。
+#
+# 反 Goodhart 审计（实测，与词典扩词同口径）：事实侧规则产出 34 个新词
+# （不+V 17 个、爱+V 17 个），其中恰好落在 v2 里的只有「不喝」1 个，占比
+# 0.029；另外 33 个在 golden+v1+v2 合计 100 对上零翻转。查询侧两个构式产出
+# 34 个新词，落在 v2 里的是 0 个（占比 0.000），同样零翻转——补它们买不到
+# 任何分数，补的理由纯粹是「承认前者却漏掉后者没有语言学依据」。
+_POLARITY_VERBS: tuple[str, ...] = (
+    "吃", "喝", "玩", "看", "去", "用", "碰", "穿", "戴",
+    "试", "尝", "买", "听", "抽", "唱", "画", "读", "跑",
 )
-NEGATIVE_MARKERS: tuple[str, ...] = (
-    "不喜欢", "讨厌", "不吃", "受不了", "忌讳", "过敏",
+
+# 否定前缀。单独立一个名字是因为它同时被构词规则与否定辖域规则（RC-7）用到。
+_NEGATION_PREFIX = "不"
+
+
+def _dedup(*groups: tuple[str, ...]) -> tuple[str, ...]:
+    """Concatenate word groups, dropping repeats, keeping first-seen order.
+
+    Contract: tuples of str in -> one tuple of str out, no duplicates, the
+    relative order of first occurrences preserved.
+
+    规则产物与手写基表必然重叠（「不吃」「爱吃」「不能吃」「吃不了」两边都有），
+    重叠本身不影响 _masked_scan 的结果（掩码保证同一段字符只被占一次），但会让
+    表长与反过拟合审计的分母虚高，所以在这里一次性去掉。dict 保插入序，
+    setdefault 只在键缺席时写入，两者合起来就是保序去重。
+    """
+    seen: dict[str, None] = {}
+    for group in groups:
+        for word in group:
+            seen.setdefault(word, None)
+    return tuple(seen)
+
+
+POSITIVE_MARKERS: tuple[str, ...] = _dedup(
+    ("最喜欢", "喜欢", "希望", "热爱", "偏好", "爱吃", "感兴趣", "只想"),
+    tuple("爱" + verb for verb in _POLARITY_VERBS),
+)
+NEGATIVE_MARKERS: tuple[str, ...] = _dedup(
+    ("不喜欢", "讨厌", "不吃", "受不了", "忌讳", "过敏"),
+    tuple(_NEGATION_PREFIX + verb for verb in _POLARITY_VERBS),
 )
 
 # 查询侧的负面取向词：问「忌口/讨厌/不能吃」时，否定谓词才是对题证据。
-QUERY_NEGATIVE_MARKERS: tuple[str, ...] = (
-    "不喜欢", "讨厌", "忌口", "忌讳", "禁忌", "不能吃", "吃不了", "受不了", "过敏",
+QUERY_NEGATIVE_MARKERS: tuple[str, ...] = _dedup(
+    ("不喜欢", "讨厌", "忌口", "忌讳", "禁忌", "不能吃", "吃不了", "受不了", "过敏"),
+    tuple("不能" + verb for verb in _POLARITY_VERBS),
+    tuple(verb + "不了" for verb in _POLARITY_VERBS),
 )
 
 # 时态降权（L5）用的时态标记：短期状态/临时行为的信号词。
@@ -480,6 +531,20 @@ def _query_polarity(query: str) -> int:
     return _polarity_from_normalized(normalized, _stable_from_normalized(normalized))
 
 
+def _negated(text: str, word: str) -> bool:
+    """True when the polarity predicate `word` falls under the scope of 不.
+
+    Contract: normalized text plus one marker known to occur in it in -> bool
+    out. Only the contiguous prefixed form counts; a negation particle sitting
+    elsewhere in the text does not affect the result.
+
+    否定辖域（RC-7）的最小实现：不引入任何新词汇，只判「不 + word」这个连续
+    串在不在原文里。已知的可接受误判是「不只想」这类「不 + 副词性肯定谓词」
+    会被读成否定——它在汉语里也确实是否定，只是否定的不是偏好本身。
+    """
+    return f"{_NEGATION_PREFIX}{word}" in text
+
+
 def _polarity_hits(text: str) -> tuple[int, int]:
     """Joint polarity scan over normalized text -> (positive, negative) hits.
 
@@ -487,9 +552,22 @@ def _polarity_hits(text: str) -> tuple[int, int]:
 
     两组必须一起扫描并共享掩码：「不喜欢」含子串「喜欢」，分开扫描会让
     肯定词与否定词各计一次、极性互相抵消。
+
+    共享掩码只解决了「不喜欢」这一个手工列进否定表的词。汉语的否定前缀「不」
+    能支配**任何**肯定极性谓词，所以「不爱吃」「不热爱」「不感兴趣」「不希望」
+    同样是否定陈述，而它们的肯定部分全在 POSITIVE_MARKERS 里、会被掩码认成
+    肯定命中。旧实现在 HEAD 上就把 _polarity_hits("用户不爱吃香菜") 算成
+    (1, 0)，于是 preference_bonus("用户有什么忌口", "用户不爱吃香菜") 给出
+    -0.5——查询问的正是忌口、事实答的正是忌口，L4 却按反向证据扣分（本轮
+    诊断编号 RC-7）。修法是一条**结构性**规则而不是再补几个词：_negated 判
+    「不 + 该谓词」是否在原文里出现，命中就把这一次计数划到否定侧。它对
+    将来新增的任何肯定谓词自动生效，不需要每加一个肯定词就手工补一个否定形式。
     """
     matched = _masked_scan(text, POSITIVE_MARKERS + NEGATIVE_MARKERS)
-    positive = sum(1 for word in matched if word in POSITIVE_MARKERS)
+    positive = sum(
+        1 for word in matched
+        if word in POSITIVE_MARKERS and not _negated(text, word)
+    )
     return positive, len(matched) - positive
 
 

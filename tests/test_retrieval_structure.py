@@ -536,5 +536,66 @@ class PolarityVerbRuleTests(unittest.TestCase):
         self.assertEqual(mr.preference_bonus(query, "用户每天早上要喝一杯手冲咖啡"), 0.0)
 
 
+class NegationScopeTests(unittest.TestCase):
+    """RC-7：否定前缀「不」支配任何肯定极性谓词，不只是手工列过的那一个。
+
+    这是本轮在扩 RC-4 动词集时撞出来的**既有**缺陷，与 v2 无关：HEAD 上
+    `_polarity_hits("用户不爱吃香菜")` 就返回 (1, 0)，`_polarity_hits("用户不热爱
+    运动")` 与 `_polarity_hits("用户对钓鱼不感兴趣")` 同样返回 (1, 0)。后果是
+    `preference_bonus("用户有什么忌口", "用户不爱吃香菜") == -0.5`：查询问的正是
+    忌口、事实答的正是忌口，L4 却把它当反向证据扣分。
+
+    旧实现只对「不喜欢」手工列了一个否定形式，那就是为什么它能蒙对这一条而
+    蒙不对其他。扩完 RC-4 的动词集之后，这个漏圈的肯定谓词从 8 个变成 25 个，所以
+    必须同时处置。修法选结构性规则而不是再补词：判「不 + 该谓词」是否连续出现，
+    对将来新增的任何肯定谓词自动生效。
+    """
+
+    def test_negation_prefix_dominates_every_affirmative_predicate(self):
+        """逐个肯定谓词验：前置「不」之后必须整条计作否定证据。"""
+        for word in mr.POSITIVE_MARKERS:
+            text = mr.normalize(f"用户不{word}这个")
+            self.assertEqual(
+                mr._polarity_hits(text), (0, 1),
+                f"「不{word}」被读成了肯定极性：否定辖域没盖住这个谓词",
+            )
+
+    def test_a_bare_negation_elsewhere_does_not_flip_the_polarity(self):
+        """辖域只看连续串：句尾一个不相干的「不」不得把肯定谓词翻成否定。
+
+        没有这一条，上一条会被一个「只要句里有不就算否定」的惰实现蒙对。
+        """
+        self.assertEqual(
+            mr._polarity_hits(mr.normalize("用户喜欢香菜，不过库存不多")), (1, 0),
+            "不相干的「不」把肯定谓词翻成了否定：辖域判得比连续串宽",
+        )
+        self.assertEqual(
+            mr._polarity_hits(mr.normalize("用户喜欢香菜，而且不挑牌子")), (1, 0),
+        )
+
+    def test_query_orientation_follows_the_negation_scope(self):
+        """查询侧同一条规则：「不爱吃什么」问的是负向约束，不能因为含子串「爱吃」
+        就判成正向——那会让 L4 去奖励与提问方向相反的事实。"""
+        self.assertEqual(mr._query_context("用户喜欢喝什么").polarity, 1)
+        self.assertEqual(mr._query_context("用户不喜欢什么").polarity, -1)
+        self.assertEqual(mr._query_context("用户不爱吃什么").polarity, -1)
+        self.assertEqual(mr._query_context("用户对什么不感兴趣").polarity, -1)
+
+    def test_a_restriction_query_rewards_the_restriction_itself(self):
+        """行为级：问忌口时，一条忌口陈述必须拿正分。
+
+        红的时候它是 -0.5：符号完全反了。本条不引用 v2 的任何一对，用的是
+        与 test_memory_retrieval 里已有那组忌口断言同形的合成句。
+        """
+        self.assertGreater(
+            mr.preference_bonus("用户有什么忌口", "用户不爱吃香菜"), 0.0,
+            "L4 把对题的忌口陈述当成反向证据扣分：否定辖域丢了",
+        )
+        self.assertLess(
+            mr.preference_bonus("用户有什么忌口", "用户喜欢吃香菜"), 0.0,
+            "对称校验：肯定事实在负向提问下必须拿负分",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
