@@ -3,7 +3,7 @@
 
 Five-layer scoring model over raw Chinese text (no tokenizer, stdlib only):
 
-  L1 normalize          NFKC fold, lowercase, strip whitespace + punctuation
+  L1 normalize          NFKC fold, casefold, strip whitespace + punctuation
   L2 bigram_similarity  character-bigram multiset cosine (dictionary-free)
   L3 concept_bridge     small concept lexicon bridges non-overlapping wordings
   L4 preference_bonus   explicit preference assertions ("喜欢 X") count as
@@ -14,6 +14,18 @@ Five-layer scoring model over raw Chinese text (no tokenizer, stdlib only):
 Layers are separate pure functions so each signal can be unit-tested and the
 weight constants can be perturbed independently (sensitivity analysis lives
 in evidence/task_b_retrieval_analysis.md).
+
+Docstring 约定（审查发现 L11）：本模块与 memory_store 的每个函数 docstring
+一律分两段：首段纯英文写契约（Contract: 输入 -> 输出、值域、边界约定），
+设计理由另起一段用中文，两段之间空行分隔。英文契约段里不夹中文例词，需要
+举中文例子时放进中文段——这样审阅者只读英文段就能拿到接口口径，中文段承担
+「为何这么设计」的解释，两者不互相污染。例外：上面这张分层总览表里保留了
+中文例词（「喜欢 X」「最近/今天」），因为那些词就是各层实际要比对的资料，
+换成英文描述反而丢了信息；例外只适用于模块级总览，不适用于函数 docstring。
+
+术语约定（审查发现 M19）：L5 的中文名一律用「时态降权」，L4 用「极性感知
+偏好加分」；不混用「短期状态降权」「时态惩罚」等别名，以免文档与代码对不
+上同一样东西。
 """
 from __future__ import annotations
 
@@ -21,7 +33,9 @@ import math
 import re
 import unicodedata
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,7 +56,13 @@ class ConceptClass:
 # head 一律不用单字（审查发现 M1）：单字做子串命中会让「超市/角色/脸色/
 # 色号」被误判成城市/颜色类提问，稳定属性门控随之误开、L5 反噬对题的近期
 # 事实。golden 的 8 个查询全部含双字 head，去掉单字不影响评测。
-CONCEPT_LEXICON: dict[str, ConceptClass] = {
+#
+# 外层用 MappingProxyType 包一层（审查发现 L6）：ConceptClass 是 frozen
+# dataclass，但字典本身可写，运行期任何一处 CONCEPT_LEXICON["颜色"] = …
+# 或 .pop() 都会静默改变打分语义，而这类变更不会让任何测试变红。包成只读
+# 映射后，改词典只能整体替换模块属性（变异演练走的就是这条路），在 diff 与
+# 运行时都看得见。
+CONCEPT_LEXICON: Mapping[str, ConceptClass] = MappingProxyType({
     "颜色": ConceptClass(
         name="颜色",
         head=("颜色",),
@@ -83,13 +103,21 @@ CONCEPT_LEXICON: dict[str, ConceptClass] = {
         head=("爱好", "兴趣"),
         member=("喜欢", "热爱", "徒步", "登山", "跑步", "游泳", "骑车", "唱歌", "画画", "读书", "旅游", "摄影", "钓鱼", "健身", "运动"),
     ),
-}
+})
 
-# L1 剥离集：ASCII 标点 + CJK 标点/全角符号区 + 各类空白。宁可多剥：
-# 字面相似度层只关心内容字符，标点在全角/半角混写时本身就不稳定。
+# L1 剥离集：ASCII 标点 + CJK 标点/全角符号区 + 通用标点区 + 各类空白。
+# 宁可多剥：字面相似度层只关心内容字符，标点在全角/半角混写时本身就不稳定。
+# 补上 \u2000-\u206f 与 \u00b7（审查发现 L4）：通用标点区里有中文排版常用的
+# 破折号、弯引号、省略号与零宽空格（U+200B/200C/200D），\u00b7 是间隔号
+# 「·」（外国人名与作品名常带）。这些字符不剥会直接进 bigram 多重集，把
+# 「洛·天依」与「洛天依」算成不同内容；零宽空格更隐蔽，肉眼看不出差异
+# 却能让字面相似度归零。NFKC 已先一步把上标/下标形式折成普通数字与字母，
+# 所以 U+2070-209F 落在本区间里不会误剥内容字符。
 _STRIP_RE = re.compile(
     "[\\s"
     "!-/:-@\\[-`{-~"
+    "\u00b7"
+    "\u2000-\u206f"
     "\u3000-\u303f"
     "\uff00-\uffef"
     "]+"
@@ -102,8 +130,14 @@ def normalize(text: str) -> str:
     Contract: any str in -> str out. NFKC (folds fullwidth ASCII to
     halfwidth), casefold, then strip whitespace and ASCII/CJK punctuation.
     CJK ideographs and digits survive; the result is what L2-L5 match on.
+
+    用 casefold() 而不是 lower()（审查发现 L4）：lower() 不做完全大小写
+    折叠，德语 ß、希腊_final sigma 与部分连字 ligature 在 lower() 下仍与
+    对应形式不等，两侧归一化后字面相似度会假阴。docstring 一直写的就是
+    casefold，实现却用 lower，属文档与代码不符。对 CJK 无影响，对拉丁
+    专有名（歌名/软件名）才体现差别。
     """
-    folded = unicodedata.normalize("NFKC", text).lower()
+    folded = unicodedata.normalize("NFKC", text).casefold()
     return _STRIP_RE.sub("", folded)
 
 
@@ -163,14 +197,15 @@ def bigram_similarity(a: str, b: str) -> float:
 
     Contract: two raw strings in -> float in [0.0, 1.0] out. 1.0 iff the two
     normalized n-gram multisets are proportional — that includes identical
-    strings AND repetition-only variants (哈哈 vs 哈哈哈哈), because cosine is
-    scale-invariant. 0.0 for disjoint gram sets or empty input.
+    strings AND repetition-only variants, because cosine is scale-invariant.
+    0.0 for disjoint gram sets or empty input.
     Degradation rule: if either side normalizes to fewer than 2 chars it has
     no bigrams, so BOTH sides fall back to unigram multisets (mixed n-gram
     orders would always intersect in zero and silently kill the signal).
 
     审查发现 M3 的处置：旧 docstring 声称「1.0 只给归一化后完全相同的字符
-    串」，但余弦对成比例向量恒为 1，契约与实现不符。两个修法里选「改契约」
+    串」，但余弦对成比例向量恒为 1（例如「哈哈」与「哈哈哈哈」得 1.0），
+    契约与实现不符。两个修法里选「改契约」
     而不是「改实现」（在 _cosine 后乘 min(len)/max(len) 的长度阻尼）：阻尼会
     系统性惩罚「查询短、事实长」这一常态形态——golden 与留出集里的事实普遍
     长于查询——把 L2 从内容探测器变成长度探测器。成比例为 1 的语义是
@@ -300,9 +335,14 @@ def concept_bridge(query: str, fact: str) -> float:
     class contributes sqrt(qh*fh) / (sqrt(qh*fh) + 1) where qh/fh are the
     per-side hit counts; the result is the mean over contributing classes.
     One-sided hits contribute nothing — a bridge needs both banks, otherwise
-    every fact sharing 「用户」 with the query would collect noise points.
-    The geometric mean keeps a lone weak hit (e.g. query says 喜欢 which is
-    an 爱好 member) from outranking a solid head-level match.
+    every fact sharing a stock lead-in phrase with the query would collect
+    noise points. The geometric mean keeps a lone weak member-level hit from
+    outranking a solid head-level match.
+
+    设计理由：单边命中不计分是必需的——真实记忆里几乎每条事实都以「用户」
+    开头，若单边也算桥接，这个高频引导词会让所有事实彼此拿分，L3 退化成
+    噪声源。取几何均值而不是命中数相加，是为了让「查询只提到一个偏好动词（它
+    同时是爱好类的 member）」这种弱命中压不过「双侧都命中 head」的强命中。
     """
     return _concept_profile(_query_context(query), _profile(fact))
 
@@ -333,7 +373,7 @@ QUERY_NEGATIVE_MARKERS: tuple[str, ...] = (
     "不喜欢", "讨厌", "忌口", "忌讳", "禁忌", "不能吃", "吃不了", "受不了", "过敏",
 )
 
-# 时态标记：短期状态/临时行为的信号词。
+# 时态降权（L5）用的时态标记：短期状态/临时行为的信号词。
 # 「刚」是单字，会误伤「刚才/金刚」类词——已知噪声，只在稳定属性
 # 提问下生效，影响面可控，换双字词会漏掉「刚换/刚养」这类真实表达。
 TRANSIENT_MARKERS: tuple[str, ...] = (
@@ -349,8 +389,10 @@ def _is_stable_attribute_query(query: str) -> bool:
     """Gate for L4/L5: does the query ask for a stable attribute?
 
     Contract: raw query in -> bool out. True iff the normalized query
-    contains at least one CONCEPT_LEXICON head word (爱好/职业/城市/…).
-    行为式提问（「周末一般干嘛」）不含 head 词，L4/L5 对它们保持静默。
+    contains at least one CONCEPT_LEXICON head word.
+
+    行为式提问（「周末一般干嘛」）不含 head 词，L4/L5 对它们保持静默；
+    否则闲聊查询也会被带偏好词的事实抢位。
     """
     return _stable_from_normalized(normalize(query[:_MAX_QUERY_CHARS]))
 
@@ -359,9 +401,9 @@ def _query_polarity(query: str) -> int:
     """Classify the query's orientation: +1 positive, -1 negative, 0 silent.
 
     Contract: raw query in -> int out. -1 when the query itself asks for a
-    negative orientation (忌口/讨厌/不能吃/过敏…), +1 when it asks for a stable
-    attribute (normalized query contains a CONCEPT_LEXICON head word), 0
-    otherwise — in which case L4 stays silent.
+    negative orientation (dietary taboo, dislike, cannot eat, allergy), +1
+    when it asks for a stable attribute (normalized query contains a
+    CONCEPT_LEXICON head word), 0 otherwise — in which case L4 stays silent.
 
     负面判定优先于稳定属性判定：「用户对花过敏」既含 head「过敏」也含负面
     取向词，此时它问的是负面约束，按 -1 处理才对题。中性（0）保留旧行为：
@@ -419,14 +461,16 @@ def preference_bonus(query: str, fact: str) -> float:
 
 
 def transient_penalty(query: str, fact: str) -> float:
-    """L5: short-term states get demoted, under the same stable-query gate.
+    """L5: tense demotion — short-term states yield to stable attributes.
 
     Contract: raw query+fact in -> float in [0.0, 1.0] out (subtracted from
     the final score by score()). Non-zero only when the query asks for a
-    stable attribute AND the fact carries a tense marker (最近/今天/刚/…).
-    Design rationale: 查询「用户的爱好/职业」问的是稳定属性，带时态标记
-    的事实是短期状态，不该抢占稳定属性的召回位；反之问「最近干嘛」时
-    这些事实恰恰对题，所以门控必须双向生效。
+    stable attribute AND the fact carries at least one tense marker.
+
+    设计理由（L5 的中文名统一叫「时态降权」，审查发现 M19）：查询「用户的
+    爱好/职业」问的是稳定属性，带时态标记（最近/今天/刚…）的事实是短期
+    状态，不该抢占稳定属性的召回位；反之问「最近干嘛」时这些事实恰恰对题，
+    所以门控必须双向生效。
     """
     return _transient_profile(_query_context(query), _profile(fact))
 
@@ -466,7 +510,10 @@ def rank(query: str, candidates: list[str]) -> list[tuple[str, float]]:
     Contract: raw query + candidate facts in -> [(fact, score), ...] out,
     descending by score. Ties keep input order (list.sort is stable), so
     results are reproducible across runs. Callers wanting top-k slice the
-    result; score_retrieval and MemoryStore.recall_relevant both take top-1.
+    result themselves: score_retrieval always takes top-1 by protocol, while
+    MemoryStore.recall_relevant takes top-`limit` — its default is 1 so the
+    common path is top-1, but the parameter is genuinely top-k and the old
+    wording here wrongly described both callers as top-1 (review finding L7).
     """
     context = _query_context(query)
     scored = [(candidate, _score_with_context(context, candidate)) for candidate in candidates]
@@ -493,6 +540,21 @@ def rank_indices(query: str, payloads: list[str]) -> list[int]:
     return [index for index, _ in scored]
 
 
+def _as_text(value: object) -> str:
+    """Coerce one golden-set field to str without inventing content.
+
+    Contract: any value in -> str out; None yields "" rather than "None".
+
+    审查发现 L3：str(item.get("query", "")) 只对「键缺失」给空串，键存在而
+    值为 None 时会得到字面量 "None"——一个四字符的拉丁查询，会与任何含
+    "none" 的事实产生虚假字面相似度，把脏评测数据伪装成检索结果。评测集
+    出现 None 属于数据缺陷，这里的处置是降级成空字符串而不是造出一个能
+    参与打分的词；空字符串经 rank() 后所有 candidate 同分，由同分保留输入序
+    的约定给出确定结果。
+    """
+    return "" if value is None else str(value)
+
+
 def score_retrieval(golden: list[dict]) -> dict[str, float]:
     """Evaluate top-1 retrieval quality against a golden set.
 
@@ -516,9 +578,9 @@ def score_retrieval(golden: list[dict]) -> dict[str, float]:
     precisions: list[float] = []
     recalls: list[float] = []
     for item in golden:
-        query = str(item.get("query", ""))
-        stored = [str(fact) for fact in item.get("stored", [])]
-        relevant = {str(fact) for fact in item.get("relevant", [])}
+        query = _as_text(item.get("query"))
+        stored = [_as_text(fact) for fact in item.get("stored", [])]
+        relevant = {_as_text(fact) for fact in item.get("relevant", [])}
         ranked = rank(query, stored)
         retrieved = {ranked[0][0]} if ranked else set()
         hits = len(retrieved & relevant)
