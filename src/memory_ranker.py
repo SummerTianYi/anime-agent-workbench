@@ -111,6 +111,38 @@ def _ngram_multiset(text: str, n: int) -> Counter[str]:
     return Counter(text[i : i + n] for i in range(len(text) - n + 1))
 
 
+@dataclass(frozen=True, slots=True)
+class _TextProfile:
+    """Everything the layers need from one string, computed once.
+
+    normalized 供 L3/L4/L5 的子串命中复用；bigrams 与 unigrams 两个阶都预先
+    建好，因为退化规则要按「双侧长度的较小值」选 n，选哪个阶要到配对时才能
+    决定。审查发现 M6：旧实现每条 candidate 都重建 query 的 Counter，一次
+    rank 里 query 侧的字符串切片做了 O(candidates) 遍。
+    """
+
+    normalized: str
+    bigrams: Counter[str]
+    unigrams: Counter[str]
+
+
+def _profile(text: str) -> _TextProfile:
+    normalized = normalize(text)
+    return _TextProfile(
+        normalized=normalized,
+        bigrams=_ngram_multiset(normalized, 2),
+        unigrams=_ngram_multiset(normalized, 1),
+    )
+
+
+def _bigram_profile(a: _TextProfile, b: _TextProfile) -> float:
+    if not a.normalized or not b.normalized:
+        return 0.0
+    n = 2 if min(len(a.normalized), len(b.normalized)) >= 2 else 1
+    left, right = (a.bigrams, b.bigrams) if n == 2 else (a.unigrams, b.unigrams)
+    return _cosine(left, right)
+
+
 def _cosine(left: Counter[str], right: Counter[str]) -> float:
     if not left or not right:
         return 0.0
@@ -146,11 +178,7 @@ def bigram_similarity(a: str, b: str) -> float:
     它们是同一个内容的重复，而不是不同内容。改实现会动所有 L2 数值、需重做
     全部权重敏感性与逐层消融，收益却是把一个诚实的性质藏起来。
     """
-    left, right = normalize(a), normalize(b)
-    if not left or not right:
-        return 0.0
-    n = 2 if min(len(left), len(right)) >= 2 else 1
-    return _cosine(_ngram_multiset(left, n), _ngram_multiset(right, n))
+    return _bigram_profile(_profile(a), _profile(b))
 
 
 def _masked_scan(text: str, words: tuple[str, ...]) -> list[str]:
@@ -191,6 +219,79 @@ def _concept_hits(text: str, concept: ConceptClass) -> int:
     return _masked_hits(text, (*concept.head, *concept.member))
 
 
+# query 侧预计算与长度上限（审查发现 M6）。真实查询是用户一句话，500 字符
+# 已远超；不设上限则单条恶意超长 query 可拖垮每轮对话——recall_relevant 是
+# 拼 prompt 的必经路径，而 rank()/score() 的开销与 query 长度成正比。
+_MAX_QUERY_CHARS = 500
+
+
+@dataclass(frozen=True, slots=True)
+class _QueryContext:
+    """Everything the four layers need from the query, computed once per rank.
+
+    concept_hits 按 CONCEPT_LEXICON 的迭代序存放每类的 query 侧命中数，
+    stable 是「查询含任一 head 词」的 L4/L5 门控，polarity 见 _query_polarity。
+    """
+
+    profile: _TextProfile
+    concept_hits: tuple[int, ...]
+    stable: bool
+    polarity: int
+
+
+def _stable_from_normalized(normalized: str) -> bool:
+    return any(head in normalized for concept in CONCEPT_LEXICON.values() for head in concept.head)
+
+
+def _polarity_from_normalized(normalized: str, stable: bool) -> int:
+    if _masked_hits(normalized, QUERY_NEGATIVE_MARKERS):
+        return -1
+    return 1 if stable else 0
+
+
+def _query_context(query: str) -> _QueryContext:
+    """Precompute the query side once so per-candidate work stays O(fact).
+
+    Contract: raw query in -> _QueryContext out; the query is truncated to
+    _MAX_QUERY_CHARS before anything else is computed.
+
+    rank() 里每条 candidate 都重算一遍 query 的归一化与 Counter 是纯浪费：
+    旧实现 4 个层函数各自独立调 normalize(query)，合计每条 candidate 5 次
+    归一化 + 4 次 Counter 重建。实测（本机，500 candidates）：短 query 下
+    rank() 从 150.9 ms 降到 15.2 ms；query 拉到 100000 字符时旧实现要 72.70 s，
+    已接近 run_all.py 的 120 秒硬超时，而 candidate 再涨一个量级就会撞穿；
+    截断后三种 query 长度一律 15.8 ms，开销与 query 长度解耦。
+    score(query, fact) 的公开双参签名不变，预计算走内部路径。
+    """
+    normalized = normalize(query[:_MAX_QUERY_CHARS])
+    stable = _stable_from_normalized(normalized)
+    return _QueryContext(
+        profile=_TextProfile(
+            normalized=normalized,
+            bigrams=_ngram_multiset(normalized, 2),
+            unigrams=_ngram_multiset(normalized, 1),
+        ),
+        concept_hits=tuple(_concept_hits(normalized, c) for c in CONCEPT_LEXICON.values()),
+        stable=stable,
+        polarity=_polarity_from_normalized(normalized, stable),
+    )
+
+
+def _concept_profile(context: _QueryContext, fact: _TextProfile) -> float:
+    contributions: list[float] = []
+    for qh, concept in zip(context.concept_hits, CONCEPT_LEXICON.values()):
+        if qh == 0:
+            continue
+        fh = _concept_hits(fact.normalized, concept)
+        if fh == 0:
+            continue
+        strength = math.sqrt(qh * fh)
+        contributions.append(strength / (strength + 1.0))
+    if not contributions:
+        return 0.0
+    return sum(contributions) / len(contributions)
+
+
 def concept_bridge(query: str, fact: str) -> float:
     """L3: lexicon-bridged semantic affinity in [0.0, 1.0].
 
@@ -203,18 +304,7 @@ def concept_bridge(query: str, fact: str) -> float:
     The geometric mean keeps a lone weak hit (e.g. query says 喜欢 which is
     an 爱好 member) from outranking a solid head-level match.
     """
-    q, f = normalize(query), normalize(fact)
-    contributions: list[float] = []
-    for concept in CONCEPT_LEXICON.values():
-        qh = _concept_hits(q, concept)
-        fh = _concept_hits(f, concept)
-        if qh == 0 or fh == 0:
-            continue
-        strength = math.sqrt(qh * fh)
-        contributions.append(strength / (strength + 1.0))
-    if not contributions:
-        return 0.0
-    return sum(contributions) / len(contributions)
+    return _concept_profile(_query_context(query), _profile(fact))
 
 
 # 合成权重：全局常量，禁止按样例逐条调参；扰动敏感性分析见
@@ -262,8 +352,7 @@ def _is_stable_attribute_query(query: str) -> bool:
     contains at least one CONCEPT_LEXICON head word (爱好/职业/城市/…).
     行为式提问（「周末一般干嘛」）不含 head 词，L4/L5 对它们保持静默。
     """
-    q = normalize(query)
-    return any(head in q for concept in CONCEPT_LEXICON.values() for head in concept.head)
+    return _stable_from_normalized(normalize(query[:_MAX_QUERY_CHARS]))
 
 
 def _query_polarity(query: str) -> int:
@@ -279,11 +368,8 @@ def _query_polarity(query: str) -> int:
     行为式提问（「周末一般干嘛」）不含 head 词，L4 对它们保持静默，否则
     闲聊查询也会被带偏好词的事实抢位。
     """
-    if _masked_hits(normalize(query), QUERY_NEGATIVE_MARKERS):
-        return -1
-    if _is_stable_attribute_query(query):
-        return 1
-    return 0
+    normalized = normalize(query[:_MAX_QUERY_CHARS])
+    return _polarity_from_normalized(normalized, _stable_from_normalized(normalized))
 
 
 def _polarity_hits(text: str) -> tuple[int, int]:
@@ -299,6 +385,23 @@ def _polarity_hits(text: str) -> tuple[int, int]:
     return positive, len(matched) - positive
 
 
+def _preference_profile(context: _QueryContext, fact: _TextProfile) -> float:
+    if context.polarity == 0:
+        return 0.0
+    positive, negative = _polarity_hits(fact.normalized)
+    if context.polarity > 0:
+        matched, opposed = positive, negative
+    else:
+        matched, opposed = negative, positive
+    return min(matched, 2) / 2.0 - min(opposed, 2) / 2.0
+
+
+def _transient_profile(context: _QueryContext, fact: _TextProfile) -> float:
+    if not context.stable:
+        return 0.0
+    return min(_marker_count(fact.normalized, TRANSIENT_MARKERS), 2) / 2.0
+
+
 def preference_bonus(query: str, fact: str) -> float:
     """L4: polarity-aware predicate evidence, signed.
 
@@ -312,12 +415,7 @@ def preference_bonus(query: str, fact: str) -> float:
     不辨极性，问「爱好」时否定事实与肯定事实同分甚至更高（审查发现 M2）。
     饱和计数保留：多个同向谓词叠加只小幅增信，防止堆词刷分。
     """
-    polarity = _query_polarity(query)
-    if polarity == 0:
-        return 0.0
-    positive, negative = _polarity_hits(normalize(fact))
-    matched, opposed = (positive, negative) if polarity > 0 else (negative, positive)
-    return min(matched, 2) / 2.0 - min(opposed, 2) / 2.0
+    return _preference_profile(_query_context(query), _profile(fact))
 
 
 def transient_penalty(query: str, fact: str) -> float:
@@ -330,10 +428,25 @@ def transient_penalty(query: str, fact: str) -> float:
     的事实是短期状态，不该抢占稳定属性的召回位；反之问「最近干嘛」时
     这些事实恰恰对题，所以门控必须双向生效。
     """
-    if not _is_stable_attribute_query(query):
-        return 0.0
-    hits = _marker_count(normalize(fact), TRANSIENT_MARKERS)
-    return min(hits, 2) / 2.0
+    return _transient_profile(_query_context(query), _profile(fact))
+
+
+def _score_with_context(context: _QueryContext, fact: str) -> float:
+    """Score one fact against an already-precomputed query context.
+
+    Contract: _QueryContext + raw fact in -> float out, bit-for-bit equal to
+    score(query, fact) for the query the context was built from.
+
+    fact 的归一化与两个 n-gram Counter 也只算一次就交给四层复用，所以每条
+    candidate 的归一化次数从 5 降到 1（审查发现 M6）。
+    """
+    profile = _profile(fact)
+    return (
+        W_BIGRAM * _bigram_profile(context.profile, profile)
+        + W_CONCEPT * _concept_profile(context, profile)
+        + W_PREFERENCE * _preference_profile(context, profile)
+        - W_TRANSIENT * _transient_profile(context, profile)
+    )
 
 
 def score(query: str, fact: str) -> float:
@@ -344,12 +457,7 @@ def score(query: str, fact: str) -> float:
     W_TRANSIENT*L5. The weights are module-level constants on purpose:
     per-example tuning would turn the lexicon into golden-set camouflage.
     """
-    return (
-        W_BIGRAM * bigram_similarity(query, fact)
-        + W_CONCEPT * concept_bridge(query, fact)
-        + W_PREFERENCE * preference_bonus(query, fact)
-        - W_TRANSIENT * transient_penalty(query, fact)
-    )
+    return _score_with_context(_query_context(query), fact)
 
 
 def rank(query: str, candidates: list[str]) -> list[tuple[str, float]]:
@@ -360,9 +468,29 @@ def rank(query: str, candidates: list[str]) -> list[tuple[str, float]]:
     results are reproducible across runs. Callers wanting top-k slice the
     result; score_retrieval and MemoryStore.recall_relevant both take top-1.
     """
-    scored = [(candidate, score(query, candidate)) for candidate in candidates]
+    context = _query_context(query)
+    scored = [(candidate, _score_with_context(context, candidate)) for candidate in candidates]
     scored.sort(key=lambda pair: pair[1], reverse=True)
     return scored
+
+
+def rank_indices(query: str, payloads: list[str]) -> list[int]:
+    """Order the indices of payloads by relevance, most relevant first.
+
+    Contract: raw query + parallel payload list in -> list of indices out,
+    same length as the input, descending by score, ties keeping input order.
+
+    与 rank() 的差别是返回下标而不是（文本, 分数）对。MemoryStore 的 facts
+    表无 UNIQUE 约束，同一文本可以合法地对应多行；按文本反查行会把多行归并
+    成一行（审查发现 H1），所以排序层必须能把身份交回给调用方。query 上下文
+    只算一次，开销与 rank() 同量级。
+    """
+    context = _query_context(query)
+    scored = [
+        (index, _score_with_context(context, payload)) for index, payload in enumerate(payloads)
+    ]
+    scored.sort(key=lambda pair: pair[1], reverse=True)
+    return [index for index, _ in scored]
 
 
 def score_retrieval(golden: list[dict]) -> dict[str, float]:

@@ -7,14 +7,17 @@ integration (recall_relevant / format_memory_prompt).
 from __future__ import annotations
 
 import sys
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from src import memory_ranker as mr  # noqa: E402
+from src import memory_store as ms  # noqa: E402
 from src.memory_store import MemoryStore, format_memory_prompt  # noqa: E402
 
 # GOLDEN 直接 import 冻结闸门而非复制，避免两份数据静默失同步；
@@ -630,6 +633,104 @@ class PolarityTests(unittest.TestCase):
                 with self.subTest(query=query, fact=fact):
                     self.assertGreaterEqual(mr.preference_bonus(query, fact), -1.0)
                     self.assertLessEqual(mr.preference_bonus(query, fact), 1.0)
+
+
+class VisibleFactsScanLimitTests(unittest.TestCase):
+    """审查发现 M5：_visible_facts 无 LIMIT，全表扫描 + 全量 Python 打分。
+
+    本机复现 20000 行同一 session：recall_relevant(limit=1) 要 3996 ms，而
+    recall(limit=1) 只要 0.3 ms；加窗口后降到 92.5 ms。记忆表只增不删，这个
+    调用又是每轮拼 prompt 的必经路径，修复前延迟随行数线性增长且无上界。
+    用 patch 把上限压到小值来验证行为，避免为了测上限真的插两千行。
+    """
+
+    def setUp(self):
+        self.store = MemoryStore()
+        self.addCleanup(self.store.close)
+
+    def test_scan_limit_caps_rows_and_keeps_newest(self):
+        ids = [self.store.add(f"事实{i}", session_id=1) for i in range(12)]
+        with mock.patch.object(ms, "_RECALL_SCAN_LIMIT", 5):
+            self.assertEqual([f.fact_id for f in self.store._visible_facts(1)], ids[-5:][::-1])
+        self.assertEqual(len(self.store._visible_facts(1)), 12)
+
+    def test_rows_beyond_window_do_not_participate(self):
+        # 取舍如实锁定：超出窗口的旧事实不参与精排（docstring 已交代）
+        old_id = self.store.add("用户最喜欢的颜色是蓝色", session_id=1)
+        for i in range(6):
+            self.store.add(f"无关事实{i}", session_id=1)
+        with mock.patch.object(ms, "_RECALL_SCAN_LIMIT", 5):
+            facts = self.store.recall_relevant(session_id=1, query="用户喜欢什么颜色")
+        self.assertNotEqual(facts[0].fact_id, old_id)
+
+    def test_session_isolation_survives_limit(self):
+        # 最重要的一条：优化不得引入泄漏。WHERE 先于 LIMIT，别会话的行
+        # 根本不进窗口，不会占掉扫描名额
+        self.store.add("用户养了一只猫", session_id=2)
+        for i in range(6):
+            self.store.add(f"事实{i}", session_id=1)
+        with mock.patch.object(ms, "_RECALL_SCAN_LIMIT", 3):
+            facts = self.store.recall_relevant(session_id=1, query="用户养的宠物", limit=5)
+        self.assertNotIn("用户养了一只猫", [f.fact for f in facts])
+        self.assertTrue(all(f.session_id in (1, 999) for f in facts))
+
+    def test_overlong_query_does_not_blow_up_recall(self):
+        self.store.add("用户最喜欢的颜色是蓝色", session_id=1)
+        query = "用户喜欢什么颜色" + "填" * 5000
+        facts = self.store.recall_relevant(session_id=1, query=query)
+        self.assertEqual(facts[0].fact, "用户最喜欢的颜色是蓝色")
+
+
+class RankPrecomputeTests(unittest.TestCase):
+    """审查发现 M6：每个 candidate 重复归一化 query 并重建 Counter。
+
+    score() 内 4 个层函数各自独立调 normalize(query)，bigram_similarity 每次
+    重建 query 的 Counter。本机复现 500 candidates：短 query 下 rank() 从
+    150.9 ms 降到 15.2 ms；query 拉到 100000 字符时旧实现要 72.70 s（已接近
+    run_all.py 的 120 s 硬超时，candidate 再涨一个量级就撞穿），截断后一律
+    15.8 ms。这里用 normalize 调用计数作主锁，计时只作数量级参考，避免在慢
+    机器上 flaky。
+    """
+
+    QUERY = "用户喜欢什么颜色"
+    CANDIDATES = ["用户最喜欢的颜色是蓝色", "用户在杭州工作", "用户养了一只猫", "用户讨厌蓝色"]
+
+    def test_precomputed_path_matches_layer_formula_exactly(self):
+        context = mr._query_context(self.QUERY)
+        for fact in self.CANDIDATES:
+            expected = (
+                mr.W_BIGRAM * mr.bigram_similarity(self.QUERY, fact)
+                + mr.W_CONCEPT * mr.concept_bridge(self.QUERY, fact)
+                + mr.W_PREFERENCE * mr.preference_bonus(self.QUERY, fact)
+                - mr.W_TRANSIENT * mr.transient_penalty(self.QUERY, fact)
+            )
+            # 容差 0：预计算路径与逐次计算路径必须逐位相同
+            self.assertEqual(mr._score_with_context(context, fact), mr.score(self.QUERY, fact))
+            self.assertEqual(mr.score(self.QUERY, fact), expected)
+
+    def test_query_normalized_once_per_rank_call(self):
+        seen: list[str] = []
+        real = mr.normalize
+        with mock.patch.object(mr, "normalize", lambda text: (seen.append(text), real(text))[1]):
+            mr.rank(self.QUERY, self.CANDIDATES * 10)
+        self.assertEqual(seen.count(self.QUERY), 1)
+        # 锁数量级：旧实现是 8 次/candidate，现在每条 candidate 只归一化一次
+        self.assertLessEqual(len(seen), 2 + len(self.CANDIDATES) * 10)
+
+    def test_overlong_query_is_truncated_at_module_cap(self):
+        padded = self.QUERY + "无关填充" * 400
+        capped = padded[: mr._MAX_QUERY_CHARS]
+        self.assertEqual(mr.score(padded, self.CANDIDATES[0]), mr.score(capped, self.CANDIDATES[0]))
+        self.assertEqual(mr.rank(padded, self.CANDIDATES), mr.rank(capped, self.CANDIDATES))
+
+    def test_rank_scale_is_bounded(self):
+        # 锁数量级而不是绝对毫秒数：阈值刻意宽松（实测应在几十毫秒级），
+        # 慢机器上不 flaky；它的目的是让 8 倍重复归一化回潮时直接爆阈值
+        query = self.QUERY * 250
+        candidates = [f"{fact}{index}" for index, fact in enumerate(self.CANDIDATES * 50)]
+        started = time.perf_counter()
+        mr.rank(query, candidates)
+        self.assertLess(time.perf_counter() - started, 5.0)
 
 
 if __name__ == "__main__":

@@ -28,6 +28,18 @@ class MemoryFact:
     source_request_id: str
 
 
+# _visible_facts 的扫描窗口上限（审查发现 M5）。记忆表只增不删，而
+# recall_relevant 是每轮拼 prompt 的必经路径，无窗口时延迟随行数线性增长且
+# 无上界。本机复现：20000 行同一 session 时 recall_relevant(limit=1) 要
+# 3996 ms，同样条件下的 recall(limit=1) 只要 0.3 ms；加上窗口后降到 92.5 ms。
+#
+# 上限为什么是 2000：桌面端单用户每天按 20 条记忆计，2000 行约等于 100 天
+# 的沉淀，远大于一次对话实际能引用的量；打分开销与窗口成正比，2000 条在
+# M6 的预计算路径下实测仍在百毫秒量级以下。上限绝不能等于 recall() 的 10——
+# 那会让检索退化成「只在新近 10 条里找」，恰好是当初去掉 LIMIT 要避免的事。
+_RECALL_SCAN_LIMIT = 2000
+
+
 class MemoryStore:
     def __init__(self, path: Path | str | None = None) -> None:
         if path is None:
@@ -68,16 +80,31 @@ class MemoryStore:
         return [_row_to_fact(row) for row in rows]
 
     def _visible_facts(self, session_id: int) -> list[MemoryFact]:
-        """Unlimited variant of recall() scope, newest first.
+        """Session-visible rows for ranking, newest first, capped window.
 
-        recall() 的 SQL 是冻结语义不动；排序必须看到全部可见行，否则
-        相关度最高的旧事实会被新近窗口截掉。scope 谓词与 recall()
-        逐字一致（global 行 + 本 session 行），跨会话零泄漏不由本方法
-        另行决策。
+        Contract: session_id in -> list of MemoryFact out, at most
+        _RECALL_SCAN_LIMIT rows, ordered by fact_id descending.
+
+        复杂度：SQLite 侧一次带 LIMIT 的顺序扫描 O(window)，Python 侧对窗口内
+        每行打分 O(window)（query 上下文只算一次，见 memory_ranker.rank_indices），
+        所以 recall_relevant 的总开销有确定上界，不再随表的总行数增长。
+
+        recall() 的 SQL 是冻结语义不动；排序要看到尽可能多的可见行，否则
+        相关度最高的旧事实会被新近窗口截掉。
+
+        如实交代这个取舍：窗口确实会截掉超出 _RECALL_SCAN_LIMIT 的旧事实，
+        它们不参与精排，也就永远不可能被召回。这正是当初去掉 LIMIT 的动因，
+        现在重新加上是因为「无上限」把延迟风险转嫁给了每一轮对话——记忆表
+        只增不删，无上界的线性扫描迟早撞上 run_all.py 的 120 秒硬超时与用户
+        可感知的卡顿。取窗口而不是取全量，是把风险从「必然发生的性能退化」
+        换成「只在积压超过 100 天量级时才可能漏召旧事实」；上限选取理由见
+        _RECALL_SCAN_LIMIT 的注释。scope 谓词与 recall() 逐字一致（global 行
+        + 本 session 行），WHERE 先于 LIMIT 求值，别会话的行根本不进窗口、
+        不会占掉扫描名额，跨会话零泄漏不由本方法另行决策。
         """
         rows = self.connection.execute(
-            "SELECT * FROM facts WHERE scope = 'global' OR session_id = ? ORDER BY fact_id DESC",
-            (session_id,),
+            "SELECT * FROM facts WHERE scope = 'global' OR session_id = ? ORDER BY fact_id DESC LIMIT ?",
+            (session_id, _RECALL_SCAN_LIMIT),
         ).fetchall()
         return [_row_to_fact(row) for row in rows]
 
@@ -94,16 +121,17 @@ class MemoryStore:
         存在多行（global 行与 session 行重复沉淀是常态）。按文本建字典反查
         会让后一行覆盖前一行，结果把本会话行误标成 global 身份、并让 limit
         的槽位被同一行重复占用——下游按 fact_id/scope 做删除或全局化提升
-        会操错行。sorted(reverse=True) 对同分保留原序（新近优先）。
+        会操错行。所以身份交回由 memory_ranker.rank_indices 负责，它对同分
+        保留输入序（visible 是新近优先，于是同分即新近优先）。
+
+        query 在进入打分前被截到 memory_ranker._MAX_QUERY_CHARS：recall_relevant
+        与 rank() 两个入口都经 _query_context 这一个咽喉，超长 query 会把每条
+        candidate 的打分开销一起拉长，而真实查询就是一句话。
         """
         visible = self._visible_facts(session_id)
         if not query.strip():
             return visible[:limit]
-        order = sorted(
-            range(len(visible)),
-            key=lambda index: memory_ranker.score(query, visible[index].fact),
-            reverse=True,
-        )
+        order = memory_ranker.rank_indices(query, [item.fact for item in visible])
         return [visible[index] for index in order[:limit]]
 
     def close(self) -> None:
