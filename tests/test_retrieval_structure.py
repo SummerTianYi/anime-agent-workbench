@@ -355,5 +355,97 @@ class DocumentedLimitationTests(unittest.TestCase):
             self.assertEqual(mr.concept_bridge("用户的槽位名", "用户在做完全无关的事"), 0.0)
 
 
+class LexiconMaskingInvariantTests(unittest.TestCase):
+    """词典扩到 612 个成员之后必须重新钉住的不变量（第 3 块 3.2b 的连带更新）。
+
+    这四条不是缺陷复现，而是**护栏**：它们断言的性质在写下来的当下就成立，
+    存在的意义是让将来的词典变更无法静默破坏 L3 的计数口径。每条都在
+    docstring 里写清它守的是哪一条口径、以及破坏它会让哪个已修的缺陷复活。
+    """
+
+    def test_longer_member_suppresses_the_shorter_ones_it_contains(self):
+        """嵌套成员只算一条证据：M4 的口径在扩词后仍然成立。
+
+        _masked_scan 保证「更长的成员压住它所包含的更短成员」。用例里的四个
+        颜色词都能被两个单字成员平铺（银灰 = 银 + 灰），贪心必须只报长词——
+        报两条就等于把一种颜色数成两条证据，正是审查发现 M4 的形态。
+        「产品经理」压住「经理」是同一性质在四字成员上的样子。
+        """
+        lexicon = mr.CONCEPT_LEXICON
+        cases = (
+            ("颜色", "银灰", ("银", "灰")),
+            ("颜色", "金黄", ("金", "黄")),
+            ("颜色", "粉红", ("粉", "红")),
+            ("颜色", "灰白", ("灰", "白")),
+            ("职业", "产品经理", ("经理",)),
+            ("职业", "项目经理", ("经理",)),
+            ("过敏", "动物皮毛", ()),
+            ("爱好", "密室逃脱", ()),
+        )
+        for name, text, contained in cases:
+            words = (*lexicon[name].head, *lexicon[name].member)
+            for short in contained:
+                self.assertIn(short, words, f"用例已失效：{name} 里没有 {short}")
+            self.assertIn(text, words, f"用例已失效：{name} 里没有 {text}")
+            self.assertEqual(
+                mr._masked_scan(mr.normalize(text), words), [text],
+                f"{name} 的「{text}」被拆成了多条证据",
+            )
+
+    def test_matched_evidence_never_exceeds_the_text_it_came_from(self):
+        """命中词两两不重叠 ⇒ 它们的总字符数不可能超过被扫描文本的长度。
+
+        这是「同一份证据不被数两次」的可执行形式。扫描对象取词典自己的全部
+        head 与 member（612 + 12 个词），并对每个词跑全部八个类：一个词在
+        自己类里应当只报一条，在别的类里至多报若干条互不重叠的命中。
+        """
+        texts = [
+            mr.normalize(word)
+            for concept in mr.CONCEPT_LEXICON.values()
+            for word in (*concept.head, *concept.member)
+        ]
+        self.assertGreater(len(texts), 600, "词典规模与本条的覆盖声明不符")
+        for text in texts:
+            for concept in mr.CONCEPT_LEXICON.values():
+                matched = mr._masked_scan(text, (*concept.head, *concept.member))
+                self.assertLessEqual(
+                    sum(len(word) for word in matched), len(text),
+                    f"{concept.name} 在「{text}」上重复计数：{matched}",
+                )
+                self.assertEqual(
+                    len(set(matched)), len(matched),
+                    f"{concept.name} 在「{text}」上把同一个词报了两次：{matched}",
+                )
+
+    def test_head_and_member_never_share_a_word(self):
+        """head 与 member 的交集必须为空（memory_lexicon 的约束 3）。
+
+        同一个词既命名槽位又填充槽位会让 RC-3a 的双侧 head-only 排除失去意义：
+        _concept_hit_parts 判定一个命中词属于 head 还是 member，只看它在不在
+        concept.head 里，交集词永远被判成 head，于是「一侧给出了值」再也无法
+        与「两侧都只是在重复槽位名」区分开。
+        """
+        overlap = {
+            name: sorted(set(concept.head) & set(concept.member))
+            for name, concept in mr.CONCEPT_LEXICON.items()
+            if set(concept.head) & set(concept.member)
+        }
+        self.assertEqual(overlap, {}, f"head 与 member 有交集：{overlap}")
+
+    def test_no_member_is_listed_twice_within_a_class(self):
+        """同类 member 不许重复。
+
+        重复成员不会改变 _masked_scan 的结果（掩码保证同一段字符只被占一次），
+        所以它是一种静默冗余：既让词典规模与反过拟合审计的分母虚高，也让
+        「按规则生成词表」的审计对照表里同一个词出现两次。
+        """
+        dupes = {
+            name: sorted({w for w in concept.member if concept.member.count(w) > 1})
+            for name, concept in mr.CONCEPT_LEXICON.items()
+            if len(set(concept.member)) != len(concept.member)
+        }
+        self.assertEqual(dupes, {}, f"这些类有重复成员：{dupes}")
+
+
 if __name__ == "__main__":
     unittest.main()

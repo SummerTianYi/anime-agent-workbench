@@ -33,77 +33,21 @@ import math
 import re
 import unicodedata
 from collections import Counter
-from collections.abc import Mapping
 from dataclasses import dataclass
-from types import MappingProxyType
+
+from .memory_lexicon import CONCEPT_LEXICON, ConceptClass
 
 
-@dataclass(frozen=True, slots=True)
-class ConceptClass:
-    """One semantic class: head words name the concept, members are typical
-    values / synonymous surface forms used to detect hits."""
-
-    name: str
-    head: tuple[str, ...]
-    member: tuple[str, ...]
-
-
-# 概念词典：每类 head 是概念名，member 是典型取值/同义表达。
-# 反过拟合硬约束（tests 里机器可验证）：每类 ≥3 个 member 不在评测 golden
-# 集任何位置出现，词典因此是通用概念知识而非答案换皮。member 用子串
-# 命中，允许跨类重叠（如「老师」同属称呼与职业）：真实概念本就有交叠，
-# 桥接强度由双侧命中数共同决定，单类重叠不会单独拉开分差。
-# head 一律不用单字（审查发现 M1）：单字做子串命中会让「超市/角色/脸色/
-# 色号」被误判成城市/颜色类提问，稳定属性门控随之误开、L5 反噬对题的近期
-# 事实。golden 的 8 个查询全部含双字 head，去掉单字不影响评测。
+# 概念词典（ConceptClass 与 CONCEPT_LEXICON）已搬到 memory_lexicon 模块，
+# 这里再导出，使 mr.CONCEPT_LEXICON / mr.ConceptClass 与既有测试里对模块属性
+# 做 mock.patch.object 的变异演练全部保持有效。搬走的理由与枚举规则原文都在
+# 那个模块的 docstring 与注释块里；本模块只负责用它们打分。
 #
-# 外层用 MappingProxyType 包一层（审查发现 L6）：ConceptClass 是 frozen
-# dataclass，但字典本身可写，运行期任何一处 CONCEPT_LEXICON["颜色"] = …
-# 或 .pop() 都会静默改变打分语义，而这类变更不会让任何测试变红。包成只读
-# 映射后，改词典只能整体替换模块属性（变异演练走的就是这条路），在 diff 与
-# 运行时都看得见。
-CONCEPT_LEXICON: Mapping[str, ConceptClass] = MappingProxyType({
-    "颜色": ConceptClass(
-        name="颜色",
-        head=("颜色",),
-        member=("红", "橙", "黄", "绿", "青", "蓝", "紫", "黑", "白", "灰", "粉", "棕", "金", "银"),
-    ),
-    "城市": ConceptClass(
-        name="城市",
-        head=("城市",),
-        member=("北京", "上海", "广州", "深圳", "杭州", "南京", "成都", "武汉", "西安", "苏州", "天津", "重庆", "家乡", "籍贯"),
-    ),
-    "称呼": ConceptClass(
-        name="称呼",
-        head=("称呼", "名字", "姓名"),
-        member=("叫", "昵称", "老板", "老师", "先生", "女士", "小姐", "同学"),
-    ),
-    "生日": ConceptClass(
-        name="生日",
-        head=("生日", "出生"),
-        member=("月", "日", "号", "年龄", "岁", "星座"),
-    ),
-    "宠物": ConceptClass(
-        name="宠物",
-        head=("宠物",),
-        member=("猫", "狗", "兔子", "仓鼠", "鹦鹉", "乌龟", "金鱼", "蜥蜴", "养"),
-    ),
-    "过敏": ConceptClass(
-        name="过敏",
-        head=("过敏",),
-        member=("花粉", "海鲜", "芒果", "尘螨", "敏感", "忌口", "乳糖", "酒精", "药物"),
-    ),
-    "职业": ConceptClass(
-        name="职业",
-        head=("职业", "工作"),
-        member=("上班", "公司", "工程师", "程序员", "老师", "教师", "医生", "护士", "设计师", "会计", "律师", "司机", "职员"),
-    ),
-    "爱好": ConceptClass(
-        name="爱好",
-        head=("爱好", "兴趣"),
-        member=("喜欢", "热爱", "徒步", "登山", "跑步", "游泳", "骑车", "唱歌", "画画", "读书", "旅游", "摄影", "钓鱼", "健身", "运动"),
-    ),
-})
+# member 用子串命中，允许跨类重叠（如「老师」同属称呼与职业）：真实概念本就
+# 有交叠，桥接强度由双侧命中数共同决定，单类重叠不会单独拉开分差。
+# head 一律不用单字（审查发现 M1）：单字做子串命中会让「超市/角色/脸色/色号」
+# 被误判成城市/颜色类提问，稳定属性门控随之误开、L5 反噬对题的近期事实。
+
 
 # L1 剥离集：ASCII 标点 + CJK 标点/全角符号区 + 通用标点区 + 各类空白。
 # 宁可多剥：字面相似度层只关心内容字符，标点在全角/半角混写时本身就不稳定。
@@ -216,6 +160,29 @@ def bigram_similarity(a: str, b: str) -> float:
     return _bigram_profile(_profile(a), _profile(b))
 
 
+_LENGTH_ORDER: dict[tuple[str, ...], tuple[str, ...]] = {}
+
+
+def _longest_first(words: tuple[str, ...]) -> tuple[str, ...]:
+    """Memoized length-descending order of a word tuple.
+
+    Contract: tuple of words in -> tuple of the same words out, sorted by
+    length descending, order within equal lengths unspecified but stable for a
+    given input. The cache is keyed on the tuple itself, so its size is bounded
+    by the number of distinct word tuples the module is asked to scan.
+
+    扩词把八个类的成员从 88 个抬到 612 个，_masked_scan 每次调用都重排一遍
+    就成了热路径上最大的一笔无谓开销（敏感性网格要跑 88 个扰动 × 100 对）。
+    元组可哈希，按值相等，所以 _concept_hit_parts 每次现拼的
+    (*head, *member) 仍然命中同一条缓存。
+    """
+    cached = _LENGTH_ORDER.get(words)
+    if cached is None:
+        cached = tuple(sorted(words, key=len, reverse=True))
+        _LENGTH_ORDER[words] = cached
+    return cached
+
+
 def _masked_scan(text: str, words: tuple[str, ...]) -> list[str]:
     """Longest-first greedy scan over normalized text.
 
@@ -228,11 +195,20 @@ def _masked_scan(text: str, words: tuple[str, ...]) -> list[str]:
     「生日」会同时命中「生日」与 member「日」。同样的证据强度只因该类词表
     存在嵌套关系就被抬高，跨类不可比，与 concept_bridge docstring「几何均值
     让单个弱命中不超过 head 级命中」的口径不符。贪心按词长降序取最大不重叠
-    集合，是该问题的标准近似解；对本词表（最长 3 字）它给出的就是最优解。
+    集合，是该问题的标准近似解。
+
+    扩词（第 3 块 3.2b）之后本词典有 612 个成员、最长 4 字，这里要如实说明
+    贪心**不**最大化命中词的个数：颜色类里「银灰」「金黄」「粉红」「灰白」
+    都能被两个单字成员平铺，贪心给 1 个而最大不重叠子集是 2 个。这不是缺陷
+    而是本层要的语义——「银灰」是一种颜色，把它算成「银」+「灰」两条证据正
+    是 M4 要消掉的重复计数。所以本函数保证的是三件事：命中词两两不重叠、每
+    个词至多命中一次、更长的成员压住它所包含的更短成员。三条都由
+    test_retrieval_structure 的 LexiconMaskingInvariantTests 钉住。词典规模
+    翻七倍带来的排序开销由 _longest_first 的记忆化吸收。
     """
     used = bytearray(len(text))
     matched: list[str] = []
-    for word in sorted(words, key=len, reverse=True):
+    for word in _longest_first(words):
         start = text.find(word)
         while start != -1:
             end = start + len(word)
