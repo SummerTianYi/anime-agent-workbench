@@ -9,6 +9,11 @@ five-layer ranker in src/memory_ranker.py (golden set precision/recall
 >= 0.8, see tasks/B-memory-system/SPEC.md), recall_relevant() ranks the
 session-visible facts for a query, and format_memory_prompt() renders
 facts into an extra_system snippet for the harness. Keep stdlib-only.
+
+Docstring 约定（审查发现 L11）：每个函数 docstring 分两段，首段纯英文写
+契约（Contract: 输入 -> 输出、值域、边界约定），设计理由另起一段用中文，
+两段之间空行分隔，英文段里不夹中文例词。完整表述见 src/memory_ranker.py 的
+模块 docstring，两个模块用同一条规则。
 """
 from __future__ import annotations
 
@@ -27,6 +32,13 @@ class MemoryFact:
     fact: str
     source_request_id: str
 
+
+# scope 谓词单点化（审查发现 L1）：recall() 与 _visible_facts() 原来各手抄
+# 一份同样的谓词。两份手抄一旦漂移，就会出现「精排看到的行集与冻结语义不
+# 一致」：排序层可能多看到别会话的行，而这类漂移不会让任何测试变红，因为
+# 两个方法各自都自洽。抽成常量后只有一个地方能改它，跨会话零泄漏由这一行
+# 单独承载。SQL 语义逐字不变：WHERE 仍是 global 行 OR 本 session 行。
+_SCOPE_SQL = "scope = 'global' OR session_id = ?"
 
 # _visible_facts 的扫描窗口上限（审查发现 M5）。记忆表只增不删，而
 # recall_relevant 是每轮拼 prompt 的必经路径，无窗口时延迟随行数线性增长且
@@ -72,9 +84,14 @@ class MemoryStore:
         return int(cursor.lastrowid)
 
     def recall(self, session_id: int, limit: int = 10) -> list[MemoryFact]:
-        """Facts visible inside one session: its own rows plus global rows."""
+        """Facts visible inside one session, newest first, at most `limit`.
+
+        Contract: session_id + limit in -> list of MemoryFact out. Visibility
+        is "own rows plus global rows"; this SQL is the frozen scope semantics
+        every other query in this module must agree with.
+        """
         rows = self.connection.execute(
-            "SELECT * FROM facts WHERE scope = 'global' OR session_id = ? ORDER BY fact_id DESC LIMIT ?",
+            f"SELECT * FROM facts WHERE {_SCOPE_SQL} ORDER BY fact_id DESC LIMIT ?",
             (session_id, limit),
         ).fetchall()
         return [_row_to_fact(row) for row in rows]
@@ -103,7 +120,7 @@ class MemoryStore:
         不会占掉扫描名额，跨会话零泄漏不由本方法另行决策。
         """
         rows = self.connection.execute(
-            "SELECT * FROM facts WHERE scope = 'global' OR session_id = ? ORDER BY fact_id DESC LIMIT ?",
+            f"SELECT * FROM facts WHERE {_SCOPE_SQL} ORDER BY fact_id DESC LIMIT ?",
             (session_id, _RECALL_SCAN_LIMIT),
         ).fetchall()
         return [_row_to_fact(row) for row in rows]
@@ -111,11 +128,25 @@ class MemoryStore:
     def recall_relevant(self, session_id: int, query: str, limit: int = 1) -> list[MemoryFact]:
         """Rank session-visible facts against a query, most relevant first.
 
-        Contract: session_id + raw query in -> up to `limit` MemoryFact out.
+        Contract: session_id + raw query + limit in -> at most `limit`
+        MemoryFact out. `limit` must be an int >= 0, else ValueError; a None
+        query is read as "" (no retrieval intent) rather than crashing.
         Scope semantics are inherited verbatim from recall() (own rows +
         global rows), so cross-session leakage stays impossible by
         construction. Empty query means "no retrieval intent": fall back to
         recency order instead of scoring against an empty string.
+
+        入参校验（审查发现 L2）：limit 为负时旧实现不报错，而是走 Python 切片
+        order[:-1]——把窗口内除最后一条以外的全部事实（上限 2000 条）当成
+        「最相关的 limit 条」返回，随后被 format_memory_prompt 整段拼进 system
+        prompt。更糟的是同一个非法值在两个方法里语义还不一样：recall(limit=-1)
+        交给 sqlite，LIMIT -1 是「不设上限」，返回全部可见行。同一类的两个入口
+        对同一非法输入给出两种行为，且都不报错，属静默失效。recall() 是冻结
+        试点、其行为由 g1_memory 与 test_workbench 锁定，本方法不代它决策，只
+        在自己这一侧把契约钉死：limit 是「返回几条」，负数无意义即拒绝。
+        bool 是 int 的子类，limit=True 会被静默当成 1，那是笔误不是意图，一并
+        拒绝。query 为 None 时降级成空串走新近回退，与 memory_ranker._as_text
+        对评测集脏数据的处置同源（宁可少给信息，不造出能参与打分的内容）。
 
         排序走下标而不走文本：facts 表无 UNIQUE 约束，同一文本合法地
         存在多行（global 行与 session 行重复沉淀是常态）。按文本建字典反查
@@ -128,10 +159,13 @@ class MemoryStore:
         与 rank() 两个入口都经 _query_context 这一个咽喉，超长 query 会把每条
         candidate 的打分开销一起拉长，而真实查询就是一句话。
         """
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 0:
+            raise ValueError(f"limit must be an int >= 0, got {limit!r}")
+        text = "" if query is None else str(query)
         visible = self._visible_facts(session_id)
-        if not query.strip():
+        if not text.strip():
             return visible[:limit]
-        order = memory_ranker.rank_indices(query, [item.fact for item in visible])
+        order = memory_ranker.rank_indices(text, [item.fact for item in visible])
         return [visible[index] for index in order[:limit]]
 
     def close(self) -> None:
@@ -212,11 +246,14 @@ def format_memory_prompt(facts: list[MemoryFact]) -> str:
 def score_retrieval(golden: list[dict]) -> dict[str, float] | None:
     """Score the retrieval implementation against a golden set.
 
-    Each golden item: {"query": str, "stored": [facts...], "relevant":
-    [facts...]}. Returns {"precision": float, "recall": float}; the Optional
+    Contract: list of {"query": str, "stored": [facts...], "relevant":
+    [facts...]} in -> {"precision": float, "recall": float} out. The `| None`
     in the signature is the gate's PENDING protocol (None = unimplemented)
-    and is never returned now that Task B is implemented. Evaluation
-    protocol (top-1 + macro average, edge conventions) is documented on
-    memory_ranker.score_retrieval.
+    and is never returned now that Task B is implemented.
+
+    本函数只做转发，评测口径（top-1 + 宏平均 + 边界约定）由
+    memory_ranker.score_retrieval 单点承载：在这里再复述一份就等于多一处会
+    漂移的真相。g1_memory 从本模块 import 它，它是闸门与实现之间的稳定接口面，
+    所以宁可多一层转发也不把口径搬过来。
     """
     return memory_ranker.score_retrieval(golden)
