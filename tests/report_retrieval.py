@@ -4,12 +4,14 @@
 数字还在变），而这三组分析必须可被 QA 独立复跑——脚本本身就是可审计的痕迹，报告
 里的每个数字都应该能由 `./.venv/bin/python tests/report_retrieval.py <mode>` 重现。
 
-三个模式：
+四个模式：
   v2          逐对命中明细 + 宏平均 P/R + 按 D1-D11 分组的失败分布
   ablation    逐层消融：kill L1-L5 各自在 golden + v1 + v2 上的命中数与判定翻转
   sensitivity 权重敏感性：单权重扰动 + 全组合网格，找实测最恶劣方向
+  lexicon     词典审计对照表：按规则新增的词 × 恰好落在 v2 里的词 × 仍未覆盖
+              的对，外加「刻意不收的词若收进来会翻转几对」的反事实
 
-三个模式共用同一套评测口径（从 tests/test_holdout_v2.py import），所以「口径」只有
+四个模式共用同一套评测口径（从 tests/test_holdout_v2.py import），所以「口径」只有
 一处定义；分析脚本自己另写一份口径就等于制造第二处会漂移的真相。
 """
 from __future__ import annotations
@@ -383,11 +385,166 @@ def report_diagnose() -> None:
               f" {len(right.normalized):>9} {lr:>9.4f} {ratio:>7}")
 
 
+# ---------------------------------------------------------------------------
+# lexicon audit
+# ---------------------------------------------------------------------------
+# 扩词前那份词典的 member 逐字转录。来源是 src/memory_ranker.py 在扩词提交之前
+# 的 git blob（sha1 938baf5a48ee1cf814ba2fdb6d516928b7a89c5a，可用
+# `git cat-file -p <该 blob>` 复核），转录后由下面第一条自检断言钉住：八类合计
+# 必须是 88 个词，且每一个都仍然是现行词典的成员（本轮只增不删）。
+PRE_EXPANSION_MEMBERS = {
+    "颜色": ("红", "橙", "黄", "绿", "青", "蓝", "紫", "黑", "白", "灰", "粉", "棕", "金", "银"),
+    "城市": ("北京", "上海", "广州", "深圳", "杭州", "南京", "成都", "武汉", "西安",
+             "苏州", "天津", "重庆", "家乡", "籍贯"),
+    "称呼": ("叫", "昵称", "老板", "老师", "先生", "女士", "小姐", "同学"),
+    "生日": ("月", "日", "号", "年龄", "岁", "星座"),
+    "宠物": ("猫", "狗", "兔子", "仓鼠", "鹦鹉", "乌龟", "金鱼", "蜥蜴", "养"),
+    "过敏": ("花粉", "海鲜", "芒果", "尘螨", "敏感", "忌口", "乳糖", "酒精", "药物"),
+    "职业": ("上班", "公司", "工程师", "程序员", "老师", "教师", "医生", "护士",
+             "设计师", "会计", "律师", "司机", "职员"),
+    "爱好": ("喜欢", "热爱", "徒步", "登山", "跑步", "游泳", "骑车", "唱歌", "画画",
+             "读书", "旅游", "摄影", "钓鱼", "健身", "运动"),
+}
+
+# 刻意不收的词，与不收它的理由。理由原文在 src/memory_lexicon.py 各类的
+# 「刻意不收」注释里；这里再列一遍是为了跑反事实：把它们单独塞回词典，看能翻转
+# 几对。这个数字就是「不许照失败条目补词」这条纪律的真实代价，必须如实报出。
+DELIBERATE_EXCLUSIONS = (
+    ("职业", ("大厨",), "口语职业别称这条规则是看到某一对失败才想到的，属事后归纳"),
+    ("爱好", ("体育馆",), "场地名词是活动的周边物而不是活动名"),
+    ("爱好", ("相机",), "器材名词同上；且该对已被点名超出词表方案的能力边界"),
+    ("爱好", ("拍鸟",), "特定圈子的说法，不是常见休闲活动清单里的标准条目"),
+    ("生日", ("本命年",), "生肖纪年与生日是两个不同槽位，收它等于新增一个类去追一对样例"),
+    ("生日", ("属相",), "同上"),
+    ("过敏", ("哮喘",), "疾病名需要一个新的疾病类与新的 head，属槽位架构变更而非词表扩充"),
+    ("过敏", ("不吃",), "L4 拥有否定极性、L3 拥有概念实例，两层不许争同一条证据"),
+    # 下面两条是「组合探针」：单独加任一个都不翻转，因为 L3 要求双侧都命中同一个类。
+    # 把它们列进来是为了量化「两条排除合起来的价签」，而不是暗示它们应该被收。
+    ("生日", ("多大", "本命年"), "疑问形式不入表 + 生肖纪年不入表：两条排除必须同时撤销才可能翻转"),
+    ("城市", ("黄土高原",), "能力边界探针：黄土高原是高原不是城市，收它等于把地理常识硬编码进槽位"),
+)
+
+
+def _lexicon_with(class_name: str, extra: tuple[str, ...]):
+    """Return a copy of the live lexicon with `extra` appended to one class."""
+    from types import MappingProxyType
+
+    patched = {}
+    for key, concept in mr.CONCEPT_LEXICON.items():
+        patched[key] = (
+            mr.ConceptClass(name=concept.name, head=concept.head,
+                            member=(*concept.member, *extra))
+            if key == class_name else concept
+        )
+    return MappingProxyType(patched)
+
+
+def report_lexicon() -> None:
+    v2_blob = mr.normalize("\n".join(
+        [_text(p["query"]) for p in HOLDOUT_V2]
+        + [_text(f) for p in HOLDOUT_V2 for f in p["stored"]]
+        + [_text(f) for p in HOLDOUT_V2 for f in p["relevant"]]
+    ))
+
+    print("=" * 108)
+    print("词典审计对照表 —— 按规则新增的词 × 恰好落在 v2 里的词 × v2 仍未覆盖的对")
+    print("=" * 108)
+
+    total_old = sum(len(v) for v in PRE_EXPANSION_MEMBERS.values())
+    assert total_old == 88, f"转录的扩词前词典不是 88 个成员：{total_old}"
+    live = mr.CONCEPT_LEXICON
+    for name, old in PRE_EXPANSION_MEMBERS.items():
+        missing = [w for w in old if w not in live[name].member]
+        assert not missing, f"{name} 丢失了扩词前的成员（本轮只增不删）：{missing}"
+    print(f"扩词前 88 个成员全部保留（只增不删），来源 blob sha1 938baf5a…；现行合计 "
+          f"{sum(len(c.member) for c in live.values())} 个\n")
+
+    print("-" * 108)
+    print(f"{'类':<6}{'旧':>5}{'新':>6}{'新增':>6}{'删除':>6}{'新增∩v2':>9}{'占比':>8}  新增里落在 v2 的词")
+    print("-" * 108)
+    all_added: list[str] = []
+    all_added_in_v2: list[str] = []
+    for name, concept in live.items():
+        old = PRE_EXPANSION_MEMBERS[name]
+        new = concept.member
+        added = [w for w in new if w not in old]
+        removed = [w for w in old if w not in new]
+        hit = [w for w in added if mr.normalize(w) in v2_blob]
+        all_added += added
+        all_added_in_v2 += hit
+        share = f"{len(hit) / len(added):.3f}" if added else "n/a"
+        print(f"{name:<6}{len(old):>5}{len(new):>6}{len(added):>6}{len(removed):>6}"
+              f"{len(hit):>9}{share:>8}  {' '.join(hit) if hit else '(无)'}")
+    print("-" * 108)
+    print(f"合计  {total_old:>5}{sum(len(c.member) for c in live.values()):>6}"
+          f"{len(all_added):>6}{0:>6}{len(all_added_in_v2):>9}"
+          f"{len(all_added_in_v2) / len(all_added):>8.3f}")
+    print()
+    print("反 Goodhart 判据：新增词里落在 v2 的占比越低，越说明词表是按通用规则生成")
+    print("而不是从失败条目倒推。上面这个合计占比就是任务书要的那个数字。")
+
+    # --- 覆盖缺口：查询问到了某个槽位，但正确答案里没有该类任何 member ---
+    print()
+    print("=" * 108)
+    print("v2 里仍然没被覆盖的对（查询触发了某类 head，而 relevant 事实里没有该类任何 member）")
+    print("=" * 108)
+    print(f"{'#':>3} {'类':<6} query -> relevant")
+    print("-" * 108)
+    gaps = 0
+    for index, pair in enumerate(HOLDOUT_V2):
+        relevant = [_text(f) for f in pair["relevant"]]
+        if not relevant:
+            continue
+        query_norm = mr.normalize(_text(pair["query"]))
+        rel_norms = [mr.normalize(f) for f in relevant]
+        for concept in live.values():
+            if not any(head in query_norm for head in concept.head):
+                continue
+            if any(mr._masked_hits(rel, concept.member) for rel in rel_norms):
+                continue
+            gaps += 1
+            print(f"{index:>3} {concept.name:<6} {_text(pair['query'])} -> {relevant[0]}")
+    print("-" * 108)
+    print(f"共 {gaps} 处覆盖缺口。本仓禁用分词器，所以「没被覆盖的词」只能报到")
+    print("「对 × 类」这个粒度——把缺口定位到具体字符需要词级切分，正是本架构的能力边界。")
+
+    # --- 反事实：把刻意不收的词单独塞回去，看能翻转几对 ---
+    print()
+    print("=" * 108)
+    print("反事实：把每个「刻意不收」的词单独塞回词典，三集各翻转几对")
+    print("=" * 108)
+    print(f"{'类':<6}{'词':<8}{'在v2':>6}{'golden':>9}{'v1':>7}{'v2':>7}  翻转的 v2 对编号 / 不收它的理由")
+    print("-" * 108)
+    base = {name: _hits(corpus) for name, corpus in CORPORA.items()}
+    base_total = sum(sum(flags) for flags in base.values())
+    for class_name, words, reason in DELIBERATE_EXCLUSIONS:
+        label = "+".join(words)
+        in_v2 = "是" if all(mr.normalize(w) in v2_blob for w in words) else "否"
+        with mock.patch.object(mr, "CONCEPT_LEXICON", _lexicon_with(class_name, words)):
+            alt = {name: _hits(corpus) for name, corpus in CORPORA.items()}
+        flips = {
+            name: [i for i, (b, a) in enumerate(zip(base[name], alt[name])) if b != a]
+            for name in CORPORA
+        }
+        delta = sum(sum(f) for f in alt.values()) - base_total
+        print(f"{class_name:<6}{label:<8}{in_v2:>6}"
+              f"{sum(alt['golden']):>4}/{len(GOLDEN):<4}"
+              f"{sum(alt['v1']):>3}/{len(HOLDOUT_GOLDEN):<3}"
+              f"{sum(alt['v2']):>3}/{len(HOLDOUT_V2):<3}"
+              f"  {flips['v2'] or '无'} (净{delta:+d})  {reason}")
+    print("-" * 108)
+    print(f"基线（不算扰动）：golden {sum(base['golden'])}/{len(GOLDEN)}、"
+          f"v1 {sum(base['v1'])}/{len(HOLDOUT_GOLDEN)}、v2 {sum(base['v2'])}/{len(HOLDOUT_V2)}")
+    print("「净」是三个集合计命中数的变化。这一列就是纪律的价签：照失败条目补词能买到")
+    print("多少分，以及那些分会不会同时污染 golden 与 v1。")
+
+
 MODES = {
     "v2": report_v2,
     "diagnose": report_diagnose,
     "ablation": report_ablation,
     "sensitivity": report_sensitivity,
+    "lexicon": report_lexicon,
 }
 
 if __name__ == "__main__":
