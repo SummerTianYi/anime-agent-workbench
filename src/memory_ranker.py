@@ -39,15 +39,18 @@ class ConceptClass:
 # 集任何位置出现，词典因此是通用概念知识而非答案换皮。member 用子串
 # 命中，允许跨类重叠（如「老师」同属称呼与职业）：真实概念本就有交叠，
 # 桥接强度由双侧命中数共同决定，单类重叠不会单独拉开分差。
+# head 一律不用单字（审查发现 M1）：单字做子串命中会让「超市/角色/脸色/
+# 色号」被误判成城市/颜色类提问，稳定属性门控随之误开、L5 反噬对题的近期
+# 事实。golden 的 8 个查询全部含双字 head，去掉单字不影响评测。
 CONCEPT_LEXICON: dict[str, ConceptClass] = {
     "颜色": ConceptClass(
         name="颜色",
-        head=("颜色", "色"),
+        head=("颜色",),
         member=("红", "橙", "黄", "绿", "青", "蓝", "紫", "黑", "白", "灰", "粉", "棕", "金", "银"),
     ),
     "城市": ConceptClass(
         name="城市",
-        head=("城市", "市"),
+        head=("城市",),
         member=("北京", "上海", "广州", "深圳", "杭州", "南京", "成都", "武汉", "西安", "苏州", "天津", "重庆", "家乡", "籍贯"),
     ),
     "称呼": ConceptClass(
@@ -139,9 +142,42 @@ def bigram_similarity(a: str, b: str) -> float:
     return _cosine(_ngram_multiset(left, n), _ngram_multiset(right, n))
 
 
+def _masked_scan(text: str, words: tuple[str, ...]) -> list[str]:
+    """Longest-first greedy scan over normalized text.
+
+    Contract: normalized text + words in -> the matched words out, forming the
+    largest non-overlapping subset the greedy finds; each word appears at most
+    once in the result.
+
+    最长优先贪心掩码（审查发现 M4）：`sum(1 for w in words if w in text)`
+    对嵌套词重复计数——「颜色」会同时命中 head「颜色」与旧 head「色」，
+    「生日」会同时命中「生日」与 member「日」。同样的证据强度只因该类词表
+    存在嵌套关系就被抬高，跨类不可比，与 concept_bridge docstring「几何均值
+    让单个弱命中不超过 head 级命中」的口径不符。贪心按词长降序取最大不重叠
+    集合，是该问题的标准近似解；对本词表（最长 3 字）它给出的就是最优解。
+    """
+    used = bytearray(len(text))
+    matched: list[str] = []
+    for word in sorted(words, key=len, reverse=True):
+        start = text.find(word)
+        while start != -1:
+            end = start + len(word)
+            if not any(used[start:end]):
+                used[start:end] = b"\x01" * len(word)
+                matched.append(word)
+                break
+            start = text.find(word, start + 1)
+    return matched
+
+
+def _masked_hits(text: str, words: tuple[str, ...]) -> int:
+    """Count the largest non-overlapping subset of `words` present in text."""
+    return len(_masked_scan(text, words))
+
+
 def _concept_hits(text: str, concept: ConceptClass) -> int:
-    """Count head+member occurrences (substring) in already-normalized text."""
-    return sum(1 for word in (*concept.head, *concept.member) if word in text)
+    """Count head+member hits (substring, non-overlapping) in normalized text."""
+    return _masked_hits(text, (*concept.head, *concept.member))
 
 
 def concept_bridge(query: str, fact: str) -> float:
@@ -178,9 +214,22 @@ W_PREFERENCE = 0.10
 W_TRANSIENT = 0.35
 
 
-# 偏好/断言谓词：对稳定属性的显式声明证据
-PREFERENCE_MARKERS: tuple[str, ...] = (
-    "最喜欢", "喜欢", "希望", "热爱", "偏好", "讨厌", "不吃", "只想",
+# 偏好/断言谓词，按极性分两组（审查发现 M2）。旧实现把肯定与否定谓词
+# 混在一个 PREFERENCE_MARKERS 里且不辨查询极性，于是查询「用户的爱好」下
+# 「用户讨厌运动」拿到与「用户周末喜欢徒步」同等的加分并排到 top-1——
+# 注入 extra_system 即语义反转，LLM 会据此以为用户喜欢运动。
+# NEGATIVE_MARKERS 收「过敏」而不只「过敏于」：「用户对海鲜过敏」是负面约束
+# 断言最典型的表达形式，也是忌口类提问最对题的证据。
+POSITIVE_MARKERS: tuple[str, ...] = (
+    "最喜欢", "喜欢", "希望", "热爱", "偏好", "爱吃", "感兴趣", "只想",
+)
+NEGATIVE_MARKERS: tuple[str, ...] = (
+    "不喜欢", "讨厌", "不吃", "受不了", "忌讳", "过敏",
+)
+
+# 查询侧的负面取向词：问「忌口/讨厌/不能吃」时，否定谓词才是对题证据。
+QUERY_NEGATIVE_MARKERS: tuple[str, ...] = (
+    "不喜欢", "讨厌", "忌口", "忌讳", "禁忌", "不能吃", "吃不了", "受不了", "过敏",
 )
 
 # 时态标记：短期状态/临时行为的信号词。
@@ -206,20 +255,58 @@ def _is_stable_attribute_query(query: str) -> bool:
     return any(head in q for concept in CONCEPT_LEXICON.values() for head in concept.head)
 
 
-def preference_bonus(query: str, fact: str) -> float:
-    """L4: explicit preference assertions earn extra evidence, conditionally.
+def _query_polarity(query: str) -> int:
+    """Classify the query's orientation: +1 positive, -1 negative, 0 silent.
 
-    Contract: raw query+fact in -> float in [0.0, 1.0] out. Non-zero only
-    when (a) the query is a stable-attribute question and (b) the fact
-    carries a preference predicate (喜欢/希望/讨厌/…). Design rationale:
-    「喜欢 X」是对偏好的显式断言，而「在 X」只陈述行为；问「爱好/称呼」
-    这类稳定属性时，前者才是更强的证据。饱和计数（min(count,2)/2）：
-    多个谓词叠加只小幅增信，防止堆词刷分。
+    Contract: raw query in -> int out. -1 when the query itself asks for a
+    negative orientation (忌口/讨厌/不能吃/过敏…), +1 when it asks for a stable
+    attribute (normalized query contains a CONCEPT_LEXICON head word), 0
+    otherwise — in which case L4 stays silent.
+
+    负面判定优先于稳定属性判定：「用户对花过敏」既含 head「过敏」也含负面
+    取向词，此时它问的是负面约束，按 -1 处理才对题。中性（0）保留旧行为：
+    行为式提问（「周末一般干嘛」）不含 head 词，L4 对它们保持静默，否则
+    闲聊查询也会被带偏好词的事实抢位。
     """
-    if not _is_stable_attribute_query(query):
+    if _masked_hits(normalize(query), QUERY_NEGATIVE_MARKERS):
+        return -1
+    if _is_stable_attribute_query(query):
+        return 1
+    return 0
+
+
+def _polarity_hits(text: str) -> tuple[int, int]:
+    """Joint polarity scan over normalized text -> (positive, negative) hits.
+
+    Contract: normalized text in -> (int, int) out, both >= 0.
+
+    两组必须一起扫描并共享掩码：「不喜欢」含子串「喜欢」，分开扫描会让
+    肯定词与否定词各计一次、极性互相抵消。
+    """
+    matched = _masked_scan(text, POSITIVE_MARKERS + NEGATIVE_MARKERS)
+    positive = sum(1 for word in matched if word in POSITIVE_MARKERS)
+    return positive, len(matched) - positive
+
+
+def preference_bonus(query: str, fact: str) -> float:
+    """L4: polarity-aware predicate evidence, signed.
+
+    Contract: raw query+fact in -> float in [-1.0, 1.0] out. Non-zero only when
+    the query carries an orientation (see _query_polarity); predicates matching
+    that orientation add, opposing ones subtract. Each side saturates at
+    min(count, 2) / 2.
+
+    「喜欢 X」是对偏好的显式肯定断言，「讨厌 X」是否定断言，两者对同一个
+    提问的证据价值符号相反；「在 X」只陈述行为，不带极性信号。旧实现只加分
+    不辨极性，问「爱好」时否定事实与肯定事实同分甚至更高（审查发现 M2）。
+    饱和计数保留：多个同向谓词叠加只小幅增信，防止堆词刷分。
+    """
+    polarity = _query_polarity(query)
+    if polarity == 0:
         return 0.0
-    hits = _marker_count(normalize(fact), PREFERENCE_MARKERS)
-    return min(hits, 2) / 2.0
+    positive, negative = _polarity_hits(normalize(fact))
+    matched, opposed = (positive, negative) if polarity > 0 else (negative, positive)
+    return min(matched, 2) / 2.0 - min(opposed, 2) / 2.0
 
 
 def transient_penalty(query: str, fact: str) -> float:
