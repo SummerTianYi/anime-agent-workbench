@@ -249,9 +249,28 @@ def _masked_hits(text: str, words: tuple[str, ...]) -> int:
     return len(_masked_scan(text, words))
 
 
+def _concept_hit_parts(text: str, concept: ConceptClass) -> tuple[int, int]:
+    """Split one class scan into (head hits, member hits).
+
+    Contract: normalized text + one ConceptClass in -> (int, int) out, both
+    >= 0; the two counts are disjoint (each matched word lands in exactly one
+    of them) and their sum is the total hit count for that class.
+
+    head 词**命名**一个概念槽位（城市、生日、宠物），member 词**填充**它
+    （天津、7月、猫）。只报总数的计数无法区分「双侧都只是重复了槽位名」与
+    「一侧给出了值」，L3 会对这两种情形给出完全相同的分数（诊断编号 RC-3a
+    的实测形态）。两组计数共享同一次最长优先掩码扫描，因此嵌套词仍然只被
+    数一次（审查发现 M4 的修复点），且总和恒等于 _concept_hits。
+    """
+    matched = _masked_scan(text, (*concept.head, *concept.member))
+    head = sum(1 for word in matched if word in concept.head)
+    return head, len(matched) - head
+
+
 def _concept_hits(text: str, concept: ConceptClass) -> int:
     """Count head+member hits (substring, non-overlapping) in normalized text."""
-    return _masked_hits(text, (*concept.head, *concept.member))
+    head, member = _concept_hit_parts(text, concept)
+    return head + member
 
 
 # query 侧预计算与长度上限（审查发现 M6）。真实查询是用户一句话，500 字符
@@ -264,12 +283,18 @@ _MAX_QUERY_CHARS = 500
 class _QueryContext:
     """Everything the four layers need from the query, computed once per rank.
 
-    concept_hits 按 CONCEPT_LEXICON 的迭代序存放每类的 query 侧命中数，
-    stable 是「查询含任一 head 词」的 L4/L5 门控，polarity 见 _query_polarity。
+    concept_parts 按 CONCEPT_LEXICON 的迭代序存放每类 query 侧的
+    (head 命中数, member 命中数)，concept_hits 是两者之和（保留它是为了
+    诊断输出与既有测试仍能按「每类总命中数」读取）；stable 是 L5 的门控
+    ——「查询含任一 head 词」，polarity 见 _query_polarity。
+
+    RC-5 之后 stable 不再是 L4 的唯一门控：查询侧的偏好谓词本身也决定取向。
+    L5 仍然只认 stable，两层门控语义不同，不共用一个开关。
     """
 
     profile: _TextProfile
     concept_hits: tuple[int, ...]
+    concept_parts: tuple[tuple[int, int], ...]
     stable: bool
     polarity: int
 
@@ -317,49 +342,85 @@ def _query_context(query: str) -> _QueryContext:
     """
     normalized = normalize(query[:_MAX_QUERY_CHARS])
     stable = _stable_from_normalized(normalized)
+    parts = tuple(_concept_hit_parts(normalized, c) for c in CONCEPT_LEXICON.values())
     return _QueryContext(
         profile=_TextProfile(
             normalized=normalized,
             bigrams=_ngram_multiset(normalized, 2),
             unigrams=_ngram_multiset(normalized, 1),
         ),
-        concept_hits=tuple(_concept_hits(normalized, c) for c in CONCEPT_LEXICON.values()),
+        concept_hits=tuple(head + member for head, member in parts),
+        concept_parts=parts,
         stable=stable,
         polarity=_polarity_from_normalized(normalized, stable),
     )
 
 
 def _concept_profile(context: _QueryContext, fact: _TextProfile) -> float:
-    contributions: list[float] = []
-    for qh, concept in zip(context.concept_hits, CONCEPT_LEXICON.values()):
+    """Combine per-class concept evidence into one affinity score in [0.0, 1.0).
+
+    Contract: query context + fact profile in -> float out. A class contributes
+    only when BOTH sides hit it; the per-class value is sqrt(qh*fh) /
+    (sqrt(qh*fh) + 1) where qh/fh are that side's total hit counts; the result
+    is the noisy-OR 1 - prod(1 - c_i) over contributing classes.
+
+    两条结构修复的依据都是 report_retrieval.py diagnose 打出的分层贡献，不是
+    留出集里的具体样例。
+
+    RC-3a：双侧都只命中 head 的类不参与合成。head 词命名槽位、member 词填充
+    槽位；一侧只重复槽位名并没有给出任何值，因此不构成「桥」的一岸。这是本模块
+    早已承认的「单边命中不计分」的同一条原则的延伸——原实现承认了桥需要两岸，
+    却没承认岸必须是值而不是槽位名。排除规则写成**对称**形式（双侧都 head-only
+    才排除），以保持 concept_bridge 已文档化并有测试钉住的对称性；对称性是
+    recall_relevant 与 score_retrieval 可重复的前提。
+
+    RC-3b：合成从算术均值改为 noisy-OR。均值让 mean([0.5]) == mean([0.5, 0.5])，
+    即「命中一个类」与「命中两个类」完全同分，跨类的独立证据被归一化抹平，与本
+    模块 docstring 自称的「单个弱命中压不过 head 级强命中」直接矛盾。noisy-OR
+    是把 [0,1) 内的独立证据合成一个 [0,1) 置信度的标准做法，满足三条必需性质：
+    单类时退化为原值（改动保守，只影响多类情形）、对证据类数单调递增、值域仍在
+    [0,1)（W_CONCEPT 的量纲不变，不需要重新调参）。
+    """
+    survival = 1.0
+    for qh, q_parts, concept in zip(
+        context.concept_hits, context.concept_parts, CONCEPT_LEXICON.values()
+    ):
         if qh == 0:
             continue
-        fh = _concept_hits(fact.normalized, concept)
+        fh_head, fh_member = _concept_hit_parts(fact.normalized, concept)
+        fh = fh_head + fh_member
         if fh == 0:
             continue
+        if q_parts[1] == 0 and fh_member == 0:
+            continue
         strength = math.sqrt(qh * fh)
-        contributions.append(strength / (strength + 1.0))
-    if not contributions:
-        return 0.0
-    return sum(contributions) / len(contributions)
+        survival *= 1.0 - strength / (strength + 1.0)
+    return 1.0 - survival
 
 
 def concept_bridge(query: str, fact: str) -> float:
     """L3: lexicon-bridged semantic affinity in [0.0, 1.0].
 
-    Contract: two raw strings in -> float out. For every concept class hit by
-    BOTH sides (head or member, substring match on normalized text), the
-    class contributes sqrt(qh*fh) / (sqrt(qh*fh) + 1) where qh/fh are the
-    per-side hit counts; the result is the mean over contributing classes.
-    One-sided hits contribute nothing — a bridge needs both banks, otherwise
-    every fact sharing a stock lead-in phrase with the query would collect
-    noise points. The geometric mean keeps a lone weak member-level hit from
-    outranking a solid head-level match.
+    Contract: two raw strings in -> float out. A concept class contributes only
+    when BOTH sides hit it (substring match on normalized text) AND at least one
+    side hits a member word; the class then contributes sqrt(qh*fh) /
+    (sqrt(qh*fh) + 1) where qh/fh are the per-side total hit counts. The result
+    is the noisy-OR 1 - prod(1 - c_i) over contributing classes, so it is
+    monotone in the number of contributing classes and stays in [0.0, 1.0).
 
-    设计理由：单边命中不计分是必需的——真实记忆里几乎每条事实都以「用户」
-    开头，若单边也算桥接，这个高频引导词会让所有事实彼此拿分，L3 退化成
-    噪声源。取几何均值而不是命中数相加，是为了让「查询只提到一个偏好动词（它
-    同时是爱好类的 member）」这种弱命中压不过「双侧都命中 head」的强命中。
+    设计理由分三条，前两条是原有的，第三条由 v2 分层归因诊断补入。
+
+    一、单边命中不计分是必需的：真实记忆里几乎每条事实都以「用户」开头，若单边
+    也算桥接，这个高频引导词会让所有事实彼此拿分，L3 退化成噪声源。
+
+    二、双侧都只命中 head 同样不计分（诊断编号 RC-3a）：head 词命名槽位，member
+    词填充槽位，两侧都只是在提「城市」「生日」这个槽位名而没有给出任何值，不构成
+    桥。原实现把这两种情形打成同分，导致「重复问题里槽位名的干扰项」与「给出实例
+    的正确答案」在 L3 上完全无法区分。
+
+    三、跨类证据用 noisy-OR 合成而不是取均值（RC-3b）：均值让命中一个类与命中两个
+    类同分，独立证据被抹平。noisy-OR 单类退化为原值、对类数单调、值域不破 [0,1)，
+    因此 W_CONCEPT 的量纲与调参结论都不受影响。
     """
     return _concept_profile(_query_context(query), _profile(fact))
 

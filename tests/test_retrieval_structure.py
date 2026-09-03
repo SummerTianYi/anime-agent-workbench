@@ -313,6 +313,34 @@ class DocumentedLimitationTests(unittest.TestCase):
             "L4 的对象盲已被修掉——请同步更新模块 docstring 的「刻意不做的事」段落",
         )
 
+    def test_single_char_members_cross_match_into_other_classes(self):
+        """N1（本轮新发现）：单字 member 会被无关复合词误命中。
+
+        颜色类的 member 全是单字，而中文单字经常作为语素藏在无关复合词里：
+        「花粉」含「粉」、「银行」含「银」、「黄土」含「黄」。危害的具体形态是
+        最后一行断言：查询问颜色时，一条与颜色毫无关系的事实会拿到桥接分。
+
+        但它在本轮三个评测集上**没有造成任何一对误判**——L3 需要双侧都命中同一
+        个类才计分，而查询侧很少同时含颜色 head，所以它是一个潜伏的假阳性源，
+        不是一个已发生的故障。本轮不修它，三条理由：
+          1. 无原则性判据。同样的论证会杀掉宠物类的「猫」「狗」——它们也是单字
+             且是必需证据（「用户养了一只猫」没有 head 词，全靠 member 命中）。
+             「哪些单字有歧义」需要一份复合词表才能回答，那与本仓「纯标准库、
+             禁分词库」的约束冲突，也会把反过拟合审计的分母搅乱。
+          2. 无实测收益。三个集合计 100 对，修它翻转 0 对。
+          3. 有实测风险。颜色类的真实命中路径（「藏青色」里的「青」）依赖单字
+             member，收紧会直接伤到 D11 那一对。
+        将来若引入词级切分，这条会变红提醒同步文档。
+        """
+        lexicon = mr.CONCEPT_LEXICON
+        self.assertEqual(mr._concept_hit_parts(mr.normalize("花粉"), lexicon["颜色"]), (0, 1))
+        self.assertEqual(mr._concept_hit_parts(mr.normalize("在银行上班"), lexicon["颜色"]), (0, 1))
+        self.assertEqual(mr._concept_hit_parts(mr.normalize("黄土高原"), lexicon["颜色"]), (0, 1))
+        self.assertGreater(
+            mr.concept_bridge("用户喜欢什么颜色", "用户在银行上班"), 0.0,
+            "N1 已被修掉——请同步更新本条 docstring 里的三条不修理由",
+        )
+
     def test_head_only_exclusion_does_not_fix_a_missing_member(self):
         """RC-3a 只解决「同分」，不解决「事实侧一个类都没命中」。
 

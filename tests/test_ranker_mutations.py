@@ -7,8 +7,8 @@
 本文件里每一条断言都是**先实测再写**的，实测结论分两类，两类都如实保留：
 
   有牙齿（4 路）：W_CONCEPT=0 → 留出集 8/12；rank() 不排序 → golden 5/8；
-    清空全部 member → 留出集 9/12；清空整个词典 → golden 6/8。
-  无牙齿（4 路）：W_TRANSIENT=0、W_PREFERENCE=0、_concept_hits 退回朴素
+    清空全部 member → 留出集 8/12；清空整个词典 → golden 6/8。
+  无牙齿（4 路）：W_TRANSIENT=0、W_PREFERENCE=0、_concept_hit_parts 退回朴素
     子串计数、_polarity_hits 退回两组独立计数——这 4 路在两个评测集上都
     保持满分。对它们只断言层内行为确实消失，**不许**断言指标跌破 0.8，
     因为那是实测为假的期望。
@@ -70,6 +70,7 @@ class MutationDrill(unittest.TestCase):
         self._lexicon = mr.CONCEPT_LEXICON
         self._rank = mr.rank
         self._concept_hits = mr._concept_hits
+        self._concept_hit_parts = mr._concept_hit_parts
         self._polarity_hits = mr._polarity_hits
         # addCleanup 在测试方法结束后执行，此时 with 块已退出、mock 已还原，
         # 所以这里断言的是「没有任何变异泄漏到下一条测试」
@@ -81,6 +82,7 @@ class MutationDrill(unittest.TestCase):
         self.assertIs(mr.CONCEPT_LEXICON, self._lexicon)
         self.assertIs(mr.rank, self._rank)
         self.assertIs(mr._concept_hits, self._concept_hits)
+        self.assertIs(mr._concept_hit_parts, self._concept_hit_parts)
         self.assertIs(mr._polarity_hits, self._polarity_hits)
 
     def assert_baseline_is_perfect(self):
@@ -116,7 +118,10 @@ class MetricTeethTests(MutationDrill):
         self.assert_baseline_is_perfect()
         head_only = {k: dataclasses.replace(v, member=()) for k, v in mr.CONCEPT_LEXICON.items()}
         with mock.patch.object(mr, "CONCEPT_LEXICON", head_only):
-            self.assertEqual(_top1_hits(HOLDOUT_GOLDEN), 9)
+            # RC-3a 之后这一路的牙齿更强：member 全空意味着每个类都是双侧
+            # head-only，L3 严格归零（修复前还残留 head 级匹配信号），留出集
+            # 命中数由 9/12 降到 8/12。数字是实测的，不是估的。
+            self.assertEqual(_top1_hits(HOLDOUT_GOLDEN), 8)
             self.assertLess(_accuracy(HOLDOUT_GOLDEN), THRESHOLD)
 
     def test_emptying_the_whole_lexicon_drops_golden_below_threshold(self):
@@ -170,6 +175,28 @@ class NoMetricTeethTests(MutationDrill):
 
     def test_reverting_to_naive_substring_counting_resurfaces_m4(self):
         self.assert_baseline_is_perfect()
+
+        def naive(text, concept):
+            head = sum(1 for w in concept.head if w in text)
+            member = sum(1 for w in concept.member if w in text)
+            return head, member
+
+        # RC-3a/RC-3b 之后 L3 的原语是 _concept_hit_parts，_concept_hits 退化成
+        # 它的求和包装、已不在打分路径上。变异必须打在真正的原语上：patch 一个
+        # 没人调用的函数，指标当然不动，但那不是「这一路无牙齿」而是「假演练」
+        # ——与 H2 那条零判别力断言是同一类错误。本条的 patch 点因此随之更新。
+        with mock.patch.object(mr, "_concept_hit_parts", naive):
+            # 指标不动（实测两集仍满分），但 M4 的反例复活：「生日」同时命中
+            # head「生日」与 member「日」，同一份证据被数两次
+            self.assertEqual(_top1_hits(GOLDEN), len(GOLDEN))
+            self.assertEqual(_top1_hits(HOLDOUT_GOLDEN), len(HOLDOUT_GOLDEN))
+            self.assertEqual(naive(mr.normalize("用户的生日"), mr.CONCEPT_LEXICON["生日"]), (1, 1))
+        self.assertEqual(
+            mr._concept_hit_parts(mr.normalize("用户的生日"), mr.CONCEPT_LEXICON["生日"]), (1, 0)
+        )
+        self.assertEqual(
+            mr._concept_hits(mr.normalize("用户的生日"), mr.CONCEPT_LEXICON["生日"]), 1
+        )
 
         def naive(text, concept):
             return sum(1 for w in (*concept.head, *concept.member) if w in text)

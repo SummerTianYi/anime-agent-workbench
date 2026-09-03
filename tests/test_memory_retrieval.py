@@ -612,12 +612,36 @@ class LexiconSemanticsTests(unittest.TestCase):
 
     def test_self_bridge_strength_comparable_across_classes(self):
         # M4 的直接可测口径：同样的「查询 == 事实」自匹配，每个类的桥接
-        # 强度必须相等（修复前颜色/城市/生日三类被抬高到 0.667，其余 0.500）
-        values = set()
+        # 强度必须相等（修复前颜色/城市/生日三类被抬高到 0.667，其余 0.500）。
+        # 两处更新，都是 RC-3a/RC-3b 的直接后果：
+        #   1. 自匹配文本必须同时含 head 与 member。只含 head 的「用户的{head}」
+        #      现在双侧都 head-only，恒为 0.0，len(values)==1 会变成空转断言。
+        #   2. member 必须取「不落到别的类里」的那一个。RC-3b 的 noisy-OR 让
+        #      跨类证据真的累加了，于是 member[0] 的偶然歧义会显形：过敏类的
+        #      「花粉」含颜色类单字 member「粉」，自匹配文本因此命中两个类、
+        #      拿到 0.8333 而不是 0.6667。这个歧义本身是已记录的局限（N1，见
+        #      test_retrieval_structure.py），本测口径要隔离它，否则「跨类可比」
+        #      这条 M4 性质会被一个无关的字面巧合掩盖。
+        values = {}
         for concept in mr.CONCEPT_LEXICON.values():
-            text = f"用户的{concept.head[0]}"
-            values.add(round(mr.concept_bridge(text, text), 12))
-        self.assertEqual(len(values), 1, f"跨类自匹配强度不可比：{values}")
+            member = next(
+                (
+                    word
+                    for word in concept.member
+                    if all(
+                        other is concept
+                        or mr._concept_hits(mr.normalize(word), other) == 0
+                        for other in mr.CONCEPT_LEXICON.values()
+                    )
+                ),
+                None,
+            )
+            self.assertIsNotNone(member, f"{concept.name} 的 member 全部与其他类歧义")
+            text = f"用户的{concept.head[0]}是{member}"
+            value = round(mr.concept_bridge(text, text), 12)
+            self.assertGreater(value, 0.0, f"{concept.name} 的自匹配被 RC-3a 误伤")
+            values[concept.name] = value
+        self.assertEqual(len(set(values.values())), 1, f"跨类自匹配强度不可比：{values}")
 
     def test_masked_hits_counts_largest_non_overlapping_subset(self):
         self.assertEqual(mr._masked_hits(mr.normalize("用户住在杭州市"), ("城市", "市", "杭州")), 2)
