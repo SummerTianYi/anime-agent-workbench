@@ -6,6 +6,8 @@ integration (recall_relevant / format_memory_prompt).
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import sys
 import time
 import unittest
@@ -18,13 +20,13 @@ if str(REPO) not in sys.path:
 
 from src import memory_ranker as mr  # noqa: E402
 from src import memory_store as ms  # noqa: E402
-from src.memory_store import MemoryStore, format_memory_prompt  # noqa: E402
+from src.memory_store import MemoryFact, MemoryStore, format_memory_prompt  # noqa: E402
 
 # GOLDEN 直接 import 冻结闸门而非复制，避免两份数据静默失同步；
 # acceptance.gates 无 __init__.py，靠命名空间包机制导入（test_workbench 同法）
 from acceptance.gates.g1_memory import GOLDEN  # noqa: E402
 
-# 留出验证集：与 golden 同覆盖 8 个语义类，但表层用词刻意错开
+# 留出集：与 golden 同覆盖 8 个语义类，但表层用词刻意错开
 # （城市用成都/常驻、职业用设计师、宠物用乌龟/动物、过敏用海鲜……）。
 # 反过拟合约束：不许为迁就实现修改本集，不达标即回炉改设计。
 HOLDOUT_GOLDEN: list[dict[str, list[str] | str]] = [
@@ -41,6 +43,19 @@ HOLDOUT_GOLDEN: list[dict[str, list[str] | str]] = [
     {"query": "用户平时喜欢做什么", "stored": ["用户空下来喜欢唱歌", "用户今天在开会"], "relevant": ["用户空下来喜欢唱歌"]},
     {"query": "用户平时怎么称呼", "stored": ["用户希望被称呼为老师", "用户喜欢红色"], "relevant": ["用户希望被称呼为老师"]},
 ]
+
+
+# 留出集审计锁（审查发现 M10）：上面那句「不许为迁就实现修改本集」只是
+# 注释，机器不认。把规范化序列化的 sha256 钉在这里，任何一对被改动都会让
+# test_holdout_data_is_hash_locked 变红，而重新钉 digest 本身就在 diff 里可见，
+# 审阅者能直接看到「谁改了基准」。序列化必须规范化（sort_keys + 紧凑分隔符
+# + ensure_ascii=False），否则空白与转义差异会造成假阴。
+HOLDOUT_GOLDEN_SHA256 = "561f17ba423dfa024ba9a940632e5d6a8399ea5638ec5b56119e72c6c9b72619"
+
+
+def _holdout_digest(golden: list[dict]) -> str:
+    canonical = json.dumps(golden, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 class NormalizeTests(unittest.TestCase):
@@ -154,8 +169,27 @@ class ConceptBridgeTests(unittest.TestCase):
         self.assertGreaterEqual(score, 0.0)
         self.assertLessEqual(score, 1.0)
 
-    def test_lexicon_covers_eight_classes(self):
-        self.assertEqual(len(mr.CONCEPT_LEXICON), 8)
+    def test_lexicon_covers_at_least_eight_classes(self):
+        # 审查发现 L5：写死 assertEqual(…, 8) 会把「新增一个语义类」变成
+        # 测试失败，而词典扩充恰恰是预期的演进方向；断言下限才能既锁住
+        # 「八个类一个都不能少」又不阻止生长
+        self.assertGreaterEqual(len(mr.CONCEPT_LEXICON), 8)
+
+    def test_concept_bridge_is_symmetric(self):
+        # 审查发现 L5：原来只测了单向桥接。concept_bridge 对两侧用同一本
+        # 词典、同一个 sqrt(qh*fh) 与同一组参与均值的双侧命中类，所以它必须
+        # 对称；不对称就意味着某一侧走了不同的命中口径，会直接影响
+        # recall_relevant 与 score_retrieval 的可重复性
+        pairs = [
+            ("用户在哪座城市", "用户在杭州工作"),
+            ("用户的职业", "用户是后端工程师"),
+            ("用户养的宠物", "用户养了一只猫"),
+            ("用户的生日", "用户的生日是7月12日"),
+            ("用户的职业", "用户最喜欢的颜色是蓝色"),
+        ]
+        for left, right in pairs:
+            self.assertEqual(mr.concept_bridge(left, right), mr.concept_bridge(right, left))
+        self.assertGreater(mr.concept_bridge(pairs[0][0], pairs[0][1]), 0.0)
 
     def test_lexicon_generality_against_golden(self):
         # 反过拟合硬约束（机器可验证）：每个语义类至少 3 个 member
@@ -307,6 +341,12 @@ class ScoreRetrievalTests(unittest.TestCase):
         self.assertGreaterEqual(result["precision"], 0.8)
         self.assertGreaterEqual(result["recall"], 0.8)
 
+    def test_holdout_data_is_hash_locked(self):
+        # 审查发现 M10：留出集的反过拟合约束必须可审计，否则「改基准去
+        # 迁就实现」这个最需要防的行为反而最容易在无人察觉时发生
+        self.assertEqual(_holdout_digest(HOLDOUT_GOLDEN), HOLDOUT_GOLDEN_SHA256)
+        self.assertEqual(len(HOLDOUT_GOLDEN), 12)
+
     def test_perfect_small_set_scores_one(self):
         golden = [
             {"query": "用户养的宠物", "stored": ["用户养了一只猫"], "relevant": ["用户养了一只猫"]},
@@ -355,14 +395,15 @@ class RecallRelevantTests(unittest.TestCase):
 
     def test_empty_query_returns_recent_first(self):
         # 空查询无检索意图，退化为新近优先（与 recall() 默认序一致），
-        # 但 scope 过滤仍生效
+        # 但 scope 过滤仍生效。审查发现 M7：原断言只查 len 与「不包含别
+        # 会话的行」，对顺序零判别力——把新近优先改成最旧优先也照样绿。
+        # 改成直接钉 fact_id 序列：可见行是 1(蓝色)/2(杭州)/3(global 老板)，
+        # 新近优先取 2 条必为 [3, 2]
         facts = self.store.recall_relevant(session_id=1, query="", limit=2)
-        self.assertEqual(len(facts), 2)
+        self.assertEqual([f.fact_id for f in facts], [3, 2])
         self.assertNotIn("用户养了一只猫", [f.fact for f in facts])
 
     def test_returns_memory_fact_objects(self):
-        from src.memory_store import MemoryFact
-
         facts = self.store.recall_relevant(session_id=1, query="用户的职业")
         self.assertTrue(all(isinstance(f, MemoryFact) for f in facts))
 
@@ -370,9 +411,7 @@ class RecallRelevantTests(unittest.TestCase):
 class FormatMemoryPromptTests(unittest.TestCase):
     """prompt 片段格式化：直接作 extra_system 拼接的中文文本。"""
 
-    def _fact(self, text: str, fact_id: int = 1) -> object:
-        from src.memory_store import MemoryFact
-
+    def _fact(self, text: str, fact_id: int = 1) -> MemoryFact:
         return MemoryFact(
             fact_id=fact_id, session_id=1, scope="session", fact=text, source_request_id=""
         )
@@ -461,9 +500,7 @@ class FormatMemoryPromptSanitizationTests(unittest.TestCase):
     结构不可能被记忆正文改写，注入才真正失效。
     """
 
-    def _fact(self, text: str, fact_id: int = 1):
-        from src.memory_store import MemoryFact
-
+    def _fact(self, text: str, fact_id: int = 1) -> MemoryFact:
         return MemoryFact(
             fact_id=fact_id, session_id=1, scope="session", fact=text, source_request_id=""
         )
