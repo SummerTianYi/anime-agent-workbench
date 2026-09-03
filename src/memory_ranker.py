@@ -279,9 +279,26 @@ def _stable_from_normalized(normalized: str) -> bool:
 
 
 def _polarity_from_normalized(normalized: str, stable: bool) -> int:
+    """Query orientation: -1 negative, +1 positive, 0 silent (diagnosis RC-5).
+
+    Contract: normalized query text + the stable-attribute flag in -> int out,
+    always one of (-1, 0, 1). Negative markers are checked first and win.
+
+    问句的极性决定答案该有的极性：「喜欢 X 吗」问的是正向偏好，「讨厌 X 吗」
+    问的是负向约束。这与事实侧用 POSITIVE_MARKERS / NEGATIVE_MARKERS 判极性
+    是同一条语言学事实——原实现已经在事实侧承认它，也在查询侧承认了**负向**
+    （QUERY_NEGATIVE_MARKERS），唯独漏了查询侧的正向，于是「用户喜欢喝什么
+    饮品」这类查询的 polarity 落到 0，L4 对它完全静默，否定事实不受任何惩罚。
+    补上正向谓词检测是把已有的对称性补全，不是新增语义。
+
+    stable 仍然单独保留为一条充分条件：含 head 词的查询（「用户的过敏原」）
+    即使没有偏好谓词也在问稳定属性，L4 该生效。
+    """
     if _masked_hits(normalized, QUERY_NEGATIVE_MARKERS):
         return -1
-    return 1 if stable else 0
+    if stable or _masked_hits(normalized, POSITIVE_MARKERS):
+        return 1
+    return 0
 
 
 def _query_context(query: str) -> _QueryContext:
@@ -386,13 +403,16 @@ def _marker_count(text: str, markers: tuple[str, ...]) -> int:
 
 
 def _is_stable_attribute_query(query: str) -> bool:
-    """Gate for L4/L5: does the query ask for a stable attribute?
+    """Gate for L5: does the query ask for a stable attribute?
 
     Contract: raw query in -> bool out. True iff the normalized query
     contains at least one CONCEPT_LEXICON head word.
 
-    行为式提问（「周末一般干嘛」）不含 head 词，L4/L5 对它们保持静默；
-    否则闲聊查询也会被带偏好词的事实抢位。
+    行为式提问（「周末一般干嘛」）不含 head 词，时态降权对它们保持静默；否则
+    「用户最近喜欢吃辣」这种恰恰对题的回答会被误伤。RC-5 之后 L4 不再单独依赖
+    本门控（查询侧偏好谓词也能开启 L4），但 L5 仍然只认 head 词：两层的门控
+    语义不同——L4 问的是「这条查询有没有极性取向」，L5 问的是「这条查询是不是
+    在问一个稳定属性」，后者为真时短期状态才是干扰项。不共用一个开关。
     """
     return _stable_from_normalized(normalize(query[:_MAX_QUERY_CHARS]))
 
@@ -401,14 +421,23 @@ def _query_polarity(query: str) -> int:
     """Classify the query's orientation: +1 positive, -1 negative, 0 silent.
 
     Contract: raw query in -> int out. -1 when the query itself asks for a
-    negative orientation (dietary taboo, dislike, cannot eat, allergy), +1
-    when it asks for a stable attribute (normalized query contains a
-    CONCEPT_LEXICON head word), 0 otherwise — in which case L4 stays silent.
+    negative orientation (dietary taboo, dislike, cannot eat, allergy); +1 when
+    it asks for a stable attribute (normalized query contains a CONCEPT_LEXICON
+    head word) OR carries a positive preference predicate; 0 otherwise, in which
+    case L4 stays silent.
 
-    负面判定优先于稳定属性判定：「用户对花过敏」既含 head「过敏」也含负面
-    取向词，此时它问的是负面约束，按 -1 处理才对题。中性（0）保留旧行为：
-    行为式提问（「周末一般干嘛」）不含 head 词，L4 对它们保持静默，否则
-    闲聊查询也会被带偏好词的事实抢位。
+    负面判定优先于正面：「用户对花粉过敏」既含 head「过敏」也含负面取向词，此时
+    它问的是负面约束，按 -1 处理才对题；「用户不喜欢什么」里含子串「喜欢」，也
+    必须判 -1。
+
+    正向有两条独立的开启路径（诊断编号 RC-5）：head 词在场，或 POSITIVE_MARKERS
+    里的偏好谓词在场。原实现只有前者，于是「用户喜欢喝什么饮品」的 polarity 落到
+    0，L4 对它完全静默，「用户不喝酒」这类否定事实不受任何惩罚，靠 L2 的短文本
+    余弦优势抢到 top-1。事实侧早就同时认这两条（POSITIVE_MARKERS /
+    NEGATIVE_MARKERS），查询侧只认了负向——补正向是把已有的对称性补全。
+
+    中性（0）仍然保留：不含 head 词也不含偏好谓词的行为式提问（「周末一般干嘛」）
+    让 L4 静默，否则闲聊查询也会被带偏好词的事实抢位。
     """
     normalized = normalize(query[:_MAX_QUERY_CHARS])
     return _polarity_from_normalized(normalized, _stable_from_normalized(normalized))
