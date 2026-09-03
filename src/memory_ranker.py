@@ -116,7 +116,7 @@ def _cosine(left: Counter[str], right: Counter[str]) -> float:
         return 0.0
     if left == right:
         # 数学上恒为 1，但 sqrt 浮点误差会给出 0.9999999999999998；
-        # 「完全相同必为 1.0」是对外契约，短路保精确。
+        # 「多重集相同必为 1.0」是对外契约，短路保精确。
         return 1.0
     dot = sum(count * right[gram] for gram, count in left.items())
     if dot == 0:
@@ -129,11 +129,22 @@ def _cosine(left: Counter[str], right: Counter[str]) -> float:
 def bigram_similarity(a: str, b: str) -> float:
     """L2: character-bigram multiset cosine over normalized text.
 
-    Contract: two raw strings in -> float in [0.0, 1.0] out. 1.0 only for
-    identical normalized forms, 0.0 for disjoint gram sets or empty input.
+    Contract: two raw strings in -> float in [0.0, 1.0] out. 1.0 iff the two
+    normalized n-gram multisets are proportional — that includes identical
+    strings AND repetition-only variants (哈哈 vs 哈哈哈哈), because cosine is
+    scale-invariant. 0.0 for disjoint gram sets or empty input.
     Degradation rule: if either side normalizes to fewer than 2 chars it has
     no bigrams, so BOTH sides fall back to unigram multisets (mixed n-gram
     orders would always intersect in zero and silently kill the signal).
+
+    审查发现 M3 的处置：旧 docstring 声称「1.0 只给归一化后完全相同的字符
+    串」，但余弦对成比例向量恒为 1，契约与实现不符。两个修法里选「改契约」
+    而不是「改实现」（在 _cosine 后乘 min(len)/max(len) 的长度阻尼）：阻尼会
+    系统性惩罚「查询短、事实长」这一常态形态——golden 与留出集里的事实普遍
+    长于查询——把 L2 从内容探测器变成长度探测器。成比例为 1 的语义是
+    「n-gram 分布相同」，对重复型文本判为高度相似在检索语境里是可接受的：
+    它们是同一个内容的重复，而不是不同内容。改实现会动所有 L2 数值、需重做
+    全部权重敏感性与逐层消融，收益却是把一个诚实的性质藏起来。
     """
     left, right = normalize(a), normalize(b)
     if not left or not right:

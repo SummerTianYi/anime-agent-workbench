@@ -102,6 +102,18 @@ class BigramSimilarityTests(unittest.TestCase):
             1.0,
         )
 
+    def test_proportional_multisets_score_one(self):
+        # 审查发现 M3 的契约锁定：余弦对成比例的 n-gram 多重集恒为 1.0，
+        # 而归一化后的字符串并不相等。处置选「改契约」而不是「改实现」
+        # （长度阻尼会把 L2 从内容探测器变成长度探测器，系统性惩罚「查询
+        # 短、事实长」这一常态形态），所以这里锁定的是真实性质
+        self.assertNotEqual(mr.normalize("哈哈"), mr.normalize("哈哈哈哈"))
+        self.assertEqual(mr.bigram_similarity("哈哈", "哈哈哈哈"), 1.0)
+        self.assertEqual(mr.bigram_similarity("aaa", "aaaaaa"), 1.0)
+        self.assertEqual(mr.bigram_similarity("猫", "猫猫猫猫"), 1.0)
+        # 不成比例就不为 1.0（插字改变了分布）
+        self.assertLess(mr.bigram_similarity("蓝色", "蓝蓝蓝蓝色色"), 1.0)
+
 
 class ConceptBridgeTests(unittest.TestCase):
     """L3: lexicon bridging for queries with no literal overlap."""
