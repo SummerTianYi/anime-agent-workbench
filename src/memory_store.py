@@ -89,13 +89,22 @@ class MemoryStore:
         global rows), so cross-session leakage stays impossible by
         construction. Empty query means "no retrieval intent": fall back to
         recency order instead of scoring against an empty string.
+
+        排序走下标而不走文本：facts 表无 UNIQUE 约束，同一文本合法地
+        存在多行（global 行与 session 行重复沉淀是常态）。按文本建字典反查
+        会让后一行覆盖前一行，结果把本会话行误标成 global 身份、并让 limit
+        的槽位被同一行重复占用——下游按 fact_id/scope 做删除或全局化提升
+        会操错行。sorted(reverse=True) 对同分保留原序（新近优先）。
         """
         visible = self._visible_facts(session_id)
         if not query.strip():
             return visible[:limit]
-        ranked = memory_ranker.rank(query, [item.fact for item in visible])
-        by_text = {item.fact: item for item in visible}
-        return [by_text[text] for text, _ in ranked[:limit]]
+        order = sorted(
+            range(len(visible)),
+            key=lambda index: memory_ranker.score(query, visible[index].fact),
+            reverse=True,
+        )
+        return [visible[index] for index in order[:limit]]
 
     def close(self) -> None:
         self.connection.close()

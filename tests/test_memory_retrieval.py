@@ -380,5 +380,51 @@ class FormatMemoryPromptTests(unittest.TestCase):
         self.assertNotIn("scope", prompt)
 
 
+class RecallRelevantDuplicateTextTests(unittest.TestCase):
+    """审查发现 H1：重复 fact 文本下按文本反查会把多行归并成同一行。
+
+    facts 表无 UNIQUE 约束，同一文本合法地存在多行（典型场景：同一句
+    事实先被归为 global、后又在某会话里重复沉淀）。把 session 行标成
+    global 属身份伪造级缺陷，在「跨会话零泄漏」是硬指标的系统里不可接受。
+    """
+
+    def setUp(self):
+        self.store = MemoryStore()
+        self.addCleanup(self.store.close)
+        # 审查者给出的反例形状：先 global 后 session，文本完全相同
+        self.global_row_id = self.store.add("用户养了一只猫", session_id=999, scope="global")
+        self.session_row_id = self.store.add("用户养了一只猫", session_id=1)
+
+    def test_duplicate_text_returns_both_row_identities(self):
+        facts = self.store.recall_relevant(session_id=1, query="用户养的宠物", limit=2)
+        self.assertEqual(len(facts), 2)
+        # 只断言 fact 文本发现不了归并：两行文本本来就相同。
+        # 必须断言行身份（fact_id / scope）。
+        self.assertEqual(
+            {f.fact_id for f in facts},
+            {self.global_row_id, self.session_row_id},
+        )
+        self.assertEqual({f.scope for f in facts}, {"global", "session"})
+
+    def test_duplicate_text_does_not_return_same_object_twice(self):
+        facts = self.store.recall_relevant(session_id=1, query="用户养的宠物", limit=2)
+        self.assertIsNot(facts[0], facts[1])
+        self.assertNotEqual(facts[0].fact_id, facts[1].fact_id)
+
+    def test_session_row_not_relabeled_as_global(self):
+        # 本会话自己的行必须能以 session 身份被取回，不能被误标为
+        # 999/global——下游若按 fact_id/scope 做删除或全局化提升会操错行
+        facts = self.store.recall_relevant(session_id=1, query="用户养的宠物", limit=2)
+        session_rows = [f for f in facts if f.fact_id == self.session_row_id]
+        self.assertEqual(len(session_rows), 1)
+        self.assertEqual(session_rows[0].scope, "session")
+        self.assertEqual(session_rows[0].session_id, 1)
+
+    def test_duplicate_text_limit_one_still_returns_a_real_row(self):
+        facts = self.store.recall_relevant(session_id=1, query="用户养的宠物", limit=1)
+        self.assertEqual(len(facts), 1)
+        self.assertIn(facts[0].fact_id, {self.global_row_id, self.session_row_id})
+
+
 if __name__ == "__main__":
     unittest.main()
