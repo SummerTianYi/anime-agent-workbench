@@ -313,6 +313,46 @@ class DocumentedLimitationTests(unittest.TestCase):
             "L4 的对象盲已被修掉——请同步更新模块 docstring 的「刻意不做的事」段落",
         )
 
+    def test_l2_still_dilutes_the_longer_fact(self):
+        """RC-2：L2 的余弦口径把长事实里的查询内容稀释掉，本轮判定不可原则性修复。
+
+        机制级证据，用合成句、不引用任何评测集：下面每组的两条事实包含完全相同的
+        查询内容，长的那条只是多带了修饰语，余弦却只有短的那条的 ~0.56 倍——分母
+        里的 ||f|| 随事实变长而增长，而分子只由共享 bigram 决定。v2 的 6 个未命中
+        对全是这个形态（比值 0.23~0.71）。
+
+        为什么不在实现里修：bigram_similarity 的 docstring 记了三种替代口径在三集
+        上的实测。要点是把 L2 整层拿掉（W_BIGRAM=0）时 v2 24->19，只有 #21 翻成
+        命中而另外 6 对翻成未命中——长度偏置只绑住 1 对，L2 的内容信号值 6 对，
+        任何抹平偏置的改法都同时抹掉内容信号。不引入新参数的重叠系数与查询包含度
+        确实能让 L2 弃权，但净命中为零，且命中对最小分差从 0.0067 塌到 0.0000。
+
+        断言口径（做过变异演练，演练结果改写了本条断言）：钉死的是 cosine 下实测
+        的稀释比值本身，不是「长事实得分更低」这个方向。方向断言抓不到长度阻尼——
+        阻尼把比值从 0.559 进一步压到 0.351，方向一致却是另一种口径，初版断言在
+        阻尼变异下仍然绿，属于零判别力。四种口径在本用例上的比值实测：cosine
+        0.559/0.562、重叠系数 0.845/0.926、查询包含度 1.000/1.000、长度阻尼
+        0.351/0.257。容差 0.01 与最近的替代口径至少相差 0.20，足够区分，同时对
+        无害的浮点扰动宽容。换掉 L2 的归一化口径会让本条红，逼着改动者同步
+        bigram_similarity docstring 里那一大段判定记录，而不是悄悄推翻它。
+        """
+        cases = (
+            ("用户喜欢什么颜色", "用户喜欢蓝色",
+             "用户喜欢蓝色，尤其是那种很深、偏灰的蓝", 0.559017),
+            ("用户的家乡在哪里", "用户在湖南长沙",
+             "用户说过他老家在湖南长沙，湘江边上那个城市", 0.561951),
+        )
+        for query, short, long, expected_ratio in cases:
+            short_score = mr.bigram_similarity(query, short)
+            long_score = mr.bigram_similarity(query, long)
+            self.assertGreater(
+                short_score, long_score,
+                f"L2 不再偏短事实：{short!r} 与 {long!r} 的关系变了，请同步 docstring",
+            )
+            self.assertAlmostEqual(
+                long_score / short_score, expected_ratio, delta=0.01,
+                msg="L2 的稀释幅度变了：归一化口径被动过，RC-2 的判定记录需要重写",
+            )
     def test_single_char_members_cross_match_into_other_classes(self):
         """N1（本轮新发现）：单字 member 会被无关复合词误命中。
 
