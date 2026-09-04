@@ -1,0 +1,105 @@
+==============================================================================
+SABOTAGE_DRILL 归因分析（只读、不执行 drill、不改任何仓库文件）
+generated : 2026-09-04 16:41:58 +0100
+commit    : d6868c654a821abf7920d249683837db6068a87a
+HEAD tree : 37d26de723f1571ec3c6aa0cced25f2794eece68
+cmd       : <repo>/.venv/bin/python <scratch>/drill_attribution.py
+==============================================================================
+消毒规则：仓库根记作 <repo>，仓库外临时目录记作 <scratch>；本文件不含机器绝对路径。
+实质数值（哈希、字节数、行尾计数）逐字来自命令输出，未作任何改动。
+
+================================================================================================
+A. 5 个冻结件的当前行尾形态（缺陷④的前提是否还成立）
+================================================================================================
+  vendor/agent_core/harness.py
+      bytes=10055 CRLF=0 bare_LF=257 bare_CR=0 BOM=False
+      sha256 MATCH  cb1ae928f80674952c4ac6e6385d260a7dbd5cf93ac5ab96889ff6bdb32b2807
+  vendor/agent_core/song_catalog.py
+      bytes=4828 CRLF=0 bare_LF=138 bare_CR=0 BOM=False
+      sha256 MATCH  57d257d1084a67271a78a3b79393839c1442d37499c8a25862d80071a411e49e
+  vendor/agent_core/voice_text.py
+      bytes=1377 CRLF=0 bare_LF=29 bare_CR=0 BOM=False
+      sha256 MATCH  c652a1b868029a5f1d46b23e1720af44363081ce441c1ff008bcc86f913e4da8
+  vendor/agent_core/data/luotianyi_original_songs.json
+      bytes=8790 CRLF=0 bare_LF=262 bare_CR=0 BOM=False
+      sha256 MATCH  22552757d32c86e1bf9d52217c3c3ff588bd35a86ba1ceada6707198f2710f8d
+  acceptance/evals/scenarios.json
+      bytes=2752 CRLF=0 bare_LF=118 bare_CR=0 BOM=False
+      sha256 MATCH  2c5dab3fc5e414680193c7b998bb62cf9fe3c6299f2f002682a75efa8179b00e
+
+================================================================================================
+B. DRILL prompt-fact-sabotage   target=vendor/agent_core/harness.py   gate=acceptance/gates/g1_contract.py
+================================================================================================
+  锚点 '#66CCFF' 出现次数           = 1
+  替换串 '#000' 是否已在文中出现   = False
+  破坏前  bytes=10055 CRLF=0 bare_LF=257 bare_CR=0 BOM=False
+  破坏后  bytes=10052 CRLF=0 bare_LF=257 bare_CR=0 BOM=False
+  字节差  = -3
+  行尾形态 (CRLF, bare_LF, bare_CR, BOM) 破坏前 = (0, 257, 0, False)
+  行尾形态 (CRLF, bare_LF, bare_CR, BOM) 破坏后 = (0, 257, 0, False)
+  行尾形态是否被改写            = False   <-- 缺陷④的判据
+  还原路径（第 37 行 write_bytes(original)）能否逐字节还原 = True
+  sha256 破坏前 = cb1ae928f80674952c4ac6e6385d260a7dbd5cf93ac5ab96889ff6bdb32b2807
+  sha256 破坏后 = aab38538a5ee93980c51171d95d9767fdeb1c210ada7377ccd67980a787920d2
+  两者相同      = False
+  MANIFEST 记载 = cb1ae928f80674952c4ac6e6385d260a7dbd5cf93ac5ab96889ff6bdb32b2807
+  破坏前匹配 MANIFEST = True   <-- 前置绿的充分条件
+  破坏后匹配 MANIFEST = False  <-- g0_freeze 变红的充分条件
+  附带效应：该文件本身是冻结件，破坏窗口内 g0_freeze 也会变红（但本路的判据闸门是 acceptance/gates/g1_contract.py）
+
+================================================================================================
+B. DRILL memory-sabotage   target=src/memory_store.py   gate=acceptance/gates/g1_memory.py
+================================================================================================
+  锚点 'INSERT INTO facts' 出现次数           = 1
+  替换串 'INSERT INTO facts_gone' 是否已在文中出现   = False
+  破坏前  bytes=14257 CRLF=0 bare_LF=259 bare_CR=0 BOM=False
+  破坏后  bytes=14262 CRLF=0 bare_LF=259 bare_CR=0 BOM=False
+  字节差  = +5
+  行尾形态 (CRLF, bare_LF, bare_CR, BOM) 破坏前 = (0, 259, 0, False)
+  行尾形态 (CRLF, bare_LF, bare_CR, BOM) 破坏后 = (0, 259, 0, False)
+  行尾形态是否被改写            = False   <-- 缺陷④的判据
+  还原路径（第 37 行 write_bytes(original)）能否逐字节还原 = True
+  sha256 破坏前 = 3c81cd6b973a2b18a7be42b15d50744101ee6b1d0cec6137ee6471dd7efaa63a
+  sha256 破坏后 = 4ed14c182d507b820f4febe03f73bb49ad6cecf11e86d8f9c54efd13e5c5ca99
+  两者相同      = False
+  该文件不在 MANIFEST 的 5 个冻结件里（g0_freeze 不校验它）
+
+================================================================================================
+B. DRILL eval-tamper   target=acceptance/evals/scenarios.json   gate=acceptance/gates/g0_freeze.py
+================================================================================================
+  锚点 '"identity-01"' 出现次数           = 1
+  替换串 '"identity-01x"' 是否已在文中出现   = False
+  破坏前  bytes=2752 CRLF=0 bare_LF=118 bare_CR=0 BOM=False
+  破坏后  bytes=2753 CRLF=0 bare_LF=118 bare_CR=0 BOM=False
+  字节差  = +1
+  行尾形态 (CRLF, bare_LF, bare_CR, BOM) 破坏前 = (0, 118, 0, False)
+  行尾形态 (CRLF, bare_LF, bare_CR, BOM) 破坏后 = (0, 118, 0, False)
+  行尾形态是否被改写            = False   <-- 缺陷④的判据
+  还原路径（第 37 行 write_bytes(original)）能否逐字节还原 = True
+  sha256 破坏前 = 2c5dab3fc5e414680193c7b998bb62cf9fe3c6299f2f002682a75efa8179b00e
+  sha256 破坏后 = 6c49b964fe47a20ccda17a327f284cbcc40b20cb6b347f0bc62bcbd935890765
+  两者相同      = False
+  MANIFEST 记载 = 2c5dab3fc5e414680193c7b998bb62cf9fe3c6299f2f002682a75efa8179b00e
+  破坏前匹配 MANIFEST = True   <-- 前置绿的充分条件
+  破坏后匹配 MANIFEST = False  <-- g0_freeze 变红的充分条件
+
+================================================================================================
+C. g0_freeze 的判据本身（只读复述，不执行 --update）
+================================================================================================
+    1: """Gate 0c: integrity freeze. sha256-locks vendor files and the frozen eval set.
+   14: MANIFEST = REPO / "acceptance" / "MANIFEST.json"
+   24: def sha256(path: Path) -> str:
+   25:     return hashlib.sha256(path.read_bytes()).hexdigest()
+   29:     if not MANIFEST.is_file():
+   30:         return ["acceptance/MANIFEST.json missing - run: python -m acceptance.gates.g0_freeze --update"]
+   31:     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+   41:         elif expect != sha256(path):
+   42:             problems.append(f"{rel}: content drifted from frozen manifest")
+   48:         manifest = {rel: sha256(REPO / rel) for rel in FREEZE_TARGETS if (REPO / rel).is_file()}
+   49:         MANIFEST.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+   50:         print("MANIFEST updated:", len(manifest), "entries")
+===EXIT=0===
+
+=== 运行后仓库洁净度 ===
+git status --porcelain --untracked-files=no : ''
+git diff --stat                             : ''

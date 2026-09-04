@@ -1,0 +1,243 @@
+==============================================================================
+AFTER-DRILL MANUAL RE-GREEN VERIFICATION  +  __pycache__ POLLUTION STUDY
+generated : 2026-09-04 16:28:43 +0100
+commit    : d6868c654a821abf7920d249683837db6068a87a
+HEAD tree : 37d26de723f1571ec3c6aa0cced25f2794eece68
+==============================================================================
+消毒规则：本文件内不出现机器绝对路径。仓库根记作 <repo>，仓库外的临时
+目录记作 <scratch>。实质数值（哈希、退出码、字节数、时间戳、指标）逐字未改。
+
+REGENERATION NOTE (read this before trusting any number below)
+------------------------------------------------------------------------------
+本文件是第二版。第一版的 F/G 两节与其自身打印的数据自相矛盾，已整份重生成，
+错误如实记录如下，不做掩盖：
+  错误 1：第一版的 F.1/F.2 是在 A-D 节重跑闸门**之后**才去探测 .pyc 的。那时
+          缓存早已被重新编译成干净字节码，F.1 实测 facts_gone=False，而同一版
+          的正文却写着「on-disk bytecode IS the poisoned one」。drill 残留的
+          真实状态必须在 drill 结束后、任何闸门重跑之前探测，见下面 F.1。
+  错误 2：第一版的 F.3 对照实验把「写干净源码 / 破坏 / 还原」全部压在同一秒内，
+          于是破坏本身对缓存校验不可见，第 4 步根本没有触发重新编译，磁盘上
+          自始至终是干净缓存，测出 POISONED LOADED=False 是实验设计缺陷造成的
+          假象，不是结论。本版用 sleep 把各步分到不同的整秒，并拆成 V1/V2/V3
+          三个变体分别测，见 F.3。
+  第一版据此写下的「size 校验救了我们」这一条结论方向是对的，但当时并没有
+  实测支撑；本版 V1/V2 把它变成了实测。
+
+------------------------------------------------------------------------------
+A. 三个 drill 相关闸门单独复跑（drill 自己的复验是死代码，见 H 节）
+------------------------------------------------------------------------------
+GATE g1_memory  ts=2026-09-04 16:28:43 +0100  exit=0  (drill 前快照 0)
+  stdout: G1_MEMORY: PASS
+  stderr: (empty)
+  与 drill 前快照一致: True
+GATE g1_contract  ts=2026-09-04 16:28:43 +0100  exit=0  (drill 前快照 0)
+  stdout: G1_CONTRACT: PASS
+  stderr: (empty)
+  与 drill 前快照一致: True
+GATE g0_freeze  ts=2026-09-04 16:28:43 +0100  exit=0  (drill 前快照 0)
+  stdout: G0_FREEZE: PASS
+  stderr: (empty)
+  与 drill 前快照一致: True
+
+------------------------------------------------------------------------------
+B. 完整 8 闸门快照，与 drill 前基线逐格比对
+------------------------------------------------------------------------------
+  g0_environment   exit=0  drill前=0  same
+  g0_secrets       exit=0  drill前=0  same
+  g0_freeze        exit=0  drill前=0  same
+  g1_contract      exit=0  drill前=0  same
+  g1_memory        exit=0  drill前=0  same
+  g1_permissions   exit=2  drill前=2  same
+  g1_tools         exit=2  drill前=2  same
+  g3_simulate      exit=0  drill前=0  same
+  8 格全部与 drill 前一致: True
+
+------------------------------------------------------------------------------
+C. run_all.py 双模式（两次之间 sleep 3：第 59 行的 JSON 名只到秒级）
+------------------------------------------------------------------------------
+  [normal] cmd=<repo>/.venv/bin/python acceptance/run_all.py
+  [normal] start=2026-09-04 16:28:47 +0100 end=2026-09-04 16:28:47 +0100 exit=0 ['VERDICT: PENDING-OK']
+  [normal] 本次调用产出的 evidence JSON: ['run_20260904_162847.json']
+        PASS     g0_environment
+        PASS     g0_secrets
+        PASS     g0_freeze
+        PASS     g1_contract
+        PASS     g1_memory
+        PENDING  g1_permissions
+        PENDING  g1_tools
+        PASS     g3_simulate
+  [strict] cmd=<repo>/.venv/bin/python acceptance/run_all.py --strict
+  [strict] start=2026-09-04 16:28:50 +0100 end=2026-09-04 16:28:51 +0100 exit=1 ['VERDICT: BLOCKED']
+  [strict] 本次调用产出的 evidence JSON: ['run_20260904_162851.json']
+        PASS     g0_environment
+        PASS     g0_secrets
+        PASS     g0_freeze
+        PASS     g1_contract
+        PASS     g1_memory
+        PENDING  g1_permissions
+        PENDING  g1_tools
+        PASS     g3_simulate
+  normal exit=0（期望 0）  strict exit=1（期望 1）
+  与三轮基线 48 格逐格一致: True
+
+------------------------------------------------------------------------------
+D. unittest discover（期望 254 全绿）
+------------------------------------------------------------------------------
+  start=2026-09-04 16:28:51 +0100 end=2026-09-04 16:28:52 +0100 exit=0
+  Ran 254 tests in 0.419s
+  OK
+
+------------------------------------------------------------------------------
+E. drill 三个目标文件 sha256 与 drill 前逐一比对
+------------------------------------------------------------------------------
+  IDENTICAL  vendor/agent_core/harness.py
+      drill前 = cb1ae928f80674952c4ac6e6385d260a7dbd5cf93ac5ab96889ff6bdb32b2807
+      drill后 = cb1ae928f80674952c4ac6e6385d260a7dbd5cf93ac5ab96889ff6bdb32b2807
+  IDENTICAL  src/memory_store.py
+      drill前 = 3c81cd6b973a2b18a7be42b15d50744101ee6b1d0cec6137ee6471dd7efaa63a
+      drill后 = 3c81cd6b973a2b18a7be42b15d50744101ee6b1d0cec6137ee6471dd7efaa63a
+  IDENTICAL  acceptance/evals/scenarios.json
+      drill前 = 2c5dab3fc5e414680193c7b998bb62cf9fe3c6299f2f002682a75efa8179b00e
+      drill后 = 2c5dab3fc5e414680193c7b998bb62cf9fe3c6299f2f002682a75efa8179b00e
+  三个文件全部逐字节还原: True
+  git status --porcelain --untracked-files=no : ''
+  git diff --stat                             : ''
+
+==============================================================================
+F. __pycache__ 污染：实测，不是推论
+==============================================================================
+  F.0 drill 后 __pycache__ 目录数 = 6（drill 前 6）；.pyc 数 = 32（drill 前 32）
+      acceptance/evals/__pycache__
+      acceptance/gates/__pycache__
+      src/__pycache__
+      src/prompt_persona/__pycache__
+      tests/__pycache__
+      vendor/agent_core/__pycache__
+  机制：run_all.py 第 41 行为它的闸管子进程设了 PYTHONDONTWRITEBYTECODE=1，
+  sabotage_drill.py 第 20 行的 run_gate 没有设，所以 drill 自己跑闸门时会写字节码；
+  而第 38-39 行的 shutil.rmtree 是死代码（见 H 节），从来不清理。
+
+  F.1 drill 刚结束、任何闸门重跑之前的探测（这一份是 drill 残留的真实状态）
+      探测时刻 2026-09-04 16:12:45 +0100，即 drill 结束的同一秒。原文照录：
+        src/__pycache__/memory_store.cpython-314.pyc
+          contains sabotaged marker b'facts_gone'    = True
+          contains original  marker b'INSERT INTO facts' = True
+          header src mtime = 1788534765   actual src mtime = 1788534765   -> MATCH
+          header src size  = 14262        actual src size  = 14257        -> MISMATCH
+          => cache considered VALID by CPython? False
+        vendor/agent_core/__pycache__/harness.cpython-314.pyc
+          contains sabotaged marker b'#000'          = True
+          contains original  marker b'#66CCFF'       = False
+          header src mtime = 1788534765   actual src mtime = 1788534765   -> MATCH
+          header src size  = 10052        actual src size  = 10055        -> MISMATCH
+          => cache considered VALID by CPython? False
+      读法：磁盘上的字节码**确实是破坏态源码编译出来的**（破坏态字面量在里面，
+      原态字面量不在）。它没有被加载，原因是 size 字段对不上——
+      'facts'->'facts_gone' 恰好 +5 字节（14262-14257=5），
+      '#66CCFF'->'#000' 恰好 -3 字节（10055-10052=3），两个差值都被实测数字对上。
+      注意 mtime 字段是 **MATCH** 的：破坏与还原落在同一整秒内，所以单靠 mtime
+      校验会放行这份毒缓存。挡住它的是 size 校验，不是 mtime 校验。
+      这份探测无法在不重跑 drill 的前提下重新产生；本轮刻意不为了取证而二次
+      执行 drill，故照录原始输出并标注时刻。
+
+  F.2 闸门重跑之后（即本文件 A-D 节执行之后）的同一探测
+    src/__pycache__/memory_store.cpython-314.pyc
+      magic 2b0e0d0a == 解释器 2b0e0d0a : True
+      flags=0 (0 => 基于时间戳失效)
+      破坏态字面量仍在缓存里 : False
+      header mtime 1788534765 vs actual 1788534765 -> MATCH
+      header size  14257 vs actual 14257 -> MATCH
+      => 缓存被 CPython 认为有效? True
+    vendor/agent_core/__pycache__/harness.cpython-314.pyc
+      magic 2b0e0d0a == 解释器 2b0e0d0a : True
+      flags=0 (0 => 基于时间戳失效)
+      破坏态字面量仍在缓存里 : False
+      header mtime 1788534765 vs actual 1788534765 -> MATCH
+      header size  10055 vs actual 10055 -> MATCH
+      => 缓存被 CPython 认为有效? True
+    读法：毒缓存已经被**清掉并重编译成干净字节码**——A 节第一次跑闸门时，
+    CPython 发现 size 不匹配，从已还原的源码重新编译并覆盖了 .pyc。
+    也就是说 drill 的缓存污染是**自愈**的，但自愈靠的是 size 校验 + 惰性重编译，
+    不是 drill 自己做了什么（它什么都没做，rmtree 那两行永不执行）。
+
+  F.3 对照实验：把「什么样的破坏会真的污染」测出来
+      全部在 <scratch> 下的一次性模块上做，不碰任何仓库文件、不碰任何冻结件。
+      干净值 'aaaaaaa'。三个变体的差别只在破坏是否改变文件长度、以及各步落在哪一秒。
+
+    [V1] 变长破坏 + 立即还原（= drill 三个锚点的实际行为）
+      缓存里有破坏态字面量 : True
+      header mtime 1788535734 vs actual 1788535734 -> MATCH
+      header size  28 vs actual 18 -> MISMATCH
+      新解释器读到 : 'aaaaaaa'
+      毒字节码被加载 : False   <-- 与 F.1 的仓库实测同构
+
+    [V2] 等长破坏 + 还原（探针换成不改变文件长度的字符串）
+      缓存里有破坏态字面量 : True
+      破坏整秒=1788535735  还原整秒=1788535735  -> 天然同秒? True
+      header mtime 1788535735 vs actual 1788535735 -> MATCH
+      header size  18 vs actual 18 -> MATCH
+      新解释器读到 : 'bbbbbbb'   （磁盘源码是 'aaaaaaa'）
+      毒字节码被加载 : True
+      磁盘源码本身是干净的 : True
+      => 这就是 F.1 里那条「靠 size 挡住」的反面：一旦破坏不改变长度，
+         同秒还原后 size 与 mtime 双双 MATCH，CPython 认为缓存有效，
+         后续闸门会**执行破坏态字节码去校验已还原的源码**。
+
+    [V3] 等长破坏，且破坏落在与干净编译**同一整秒**内
+      磁盘源码此刻是破坏态 : True
+      header mtime 1788535735 vs actual 1788535735 -> MATCH
+      header size  18 vs actual 18 -> MATCH
+      缓存里有破坏态字面量 : False  （缓存还是干净那份，破坏根本没触发重编译）
+      新解释器读到 : 'aaaaaaa'
+      => 闸门跑的是干净字节码，而磁盘源码是破坏态 : True
+      这是与 V2 相反的另一种失效：**假阴性**。drill 会判定「NOT DETECTED」，
+      看起来像闸门没牙齿，实际上是破坏从未被编译进去。
+
+      （一次性目录已删除；三个变体全程未触碰仓库内任何文件）
+
+------------------------------------------------------------------------------
+G. 第 3.6 步的判定
+------------------------------------------------------------------------------
+  1) drill 确实在磁盘上留下用破坏态源码编译的 .pyc，且从不清理（F.1 实测）。
+  2) 这些毒缓存在当前三个锚点下**不会被加载**，因为两个锚点都改变文件长度，
+     CPython 的 size 校验拒绝了缓存（F.1 + V1 实测，仓库内外同构）。
+  3) 挡住污染的是 size 校验，**不是** mtime 校验：破坏与还原同秒，mtime 字段
+     实测 MATCH（F.1 + V1）。这层保护是巧合性的，不是设计出来的。
+  4) 污染是自愈的：第一次重跑闸门就会重编译并覆盖毒缓存（F.2 实测）。
+  5) 残留风险有两类，都已实测：等长破坏 + 同秒还原 -> 毒缓存被加载（V2）；
+     等长破坏且与干净编译同秒 -> 破坏不被编译，闸门假阴性（V3）。
+  6) __pycache__/ 与 *.pyc 都被 .gitignore 忽略（.gitignore 第 2、3 行），
+     所以这类污染不会出现在 git status 里，操作者得不到任何警告。
+
+------------------------------------------------------------------------------
+H. drill 自身四个代码缺陷的实测确认（集成后状态）
+------------------------------------------------------------------------------
+  缺陷①  无「破坏前 gate 须为绿」的前置断言。
+     实测确认：sabotage_drill.py 第 24-35 行直接进入破坏，没有任何前置检查。
+     本轮由外部补做前置绿快照（2026-09-04 11:05:02 +0100，8 闸门退出码
+     0/0/0/0/0/2/2/0），三个 drill 相关闸门 g1_contract、g1_memory、g0_freeze
+     在 drill 前均为 0。
+  缺陷②  第 38-43 行是死代码。
+     实测确认：第 26 行 try 块的三条路径（第 30、34、35 行）全部 return，
+     第 36-37 行 finally 还原后函数即退出，第 38 行起的 rmtree 与
+     「还原后复验回绿」永不执行。F.0/F.1 实测到 drill 后 .pyc 一个都没少，
+     正是这条死代码的直接后果；A-E 节的手工复验就是在补它没做的事。
+  缺陷③  run_gate() 丢弃闸门 stdout/stderr。
+     实测确认：第 19-21 行只 return proc.returncode。三路全部成功时整个 drill
+     的输出只有一行 —— 本轮 evidence/task_b_sabotage_drill.log 里 drill 自身
+     的输出确实只有 `DRILLS DETECTED: 3 of 3`，没有任何逐路明细。
+  缺陷④  用文本模式改写目标文件。
+     **本条与任务书的描述不符，实测判定为不成立，如实记录。**
+     第 25/27/31/37 行走的是 read_bytes -> decode('utf-8') -> str.replace ->
+     encode('utf-8') -> write_bytes。decode/encode 往返**不做任何换行转换**，
+     \r\n 会原样保留，所以「对 CRLF 文件会整体归一化」这个说法对这份代码不成立。
+     实测支撑：drill 后三个目标文件 sha256 与 drill 前逐字节一致（E 节），
+     若发生过换行归一化，scenarios.json 的 sha256 不可能还原成原值。
+     真正残留的风险是另一件事，而且它没有消失：如果进程在第 31 行写入之后、
+     第 37 行还原之前被 SIGKILL，冻结件会停在半破坏状态。本轮亲眼见到一个
+     同族实例——第一次执行 drill 时沙箱以 EPERM 拦下第 31 行的写入，第 37 行
+     的还原写入同样被拦下并抛异常；所幸**第一次写入就没成功**，文件从未被改，
+     事后实测三个 sha256 与 drill 前一致、git status 与 git diff 均空。
+     若当时的顺序反过来（破坏成功、还原被拦），冻结件就会真的坏在盘上。
+     所以：集成后全仓统一 LF 让「换行归一化」这个具体担忧不再适用（它本来也
+     不适用于这份代码），但「半破坏残留」的风险与 LF/CRLF 无关，依然存在。
