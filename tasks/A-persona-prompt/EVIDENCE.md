@@ -53,3 +53,11 @@ python acceptance/evals/run_live.py
 ```
 
 脚本已内置：单工 + 8 秒节奏（防限流）、429/超时指数退避重试、response_format JSON 强制、逐调用进度日志（evidence/live_progress.log）、完成自动写 evidence/live_*.json 并输出 HARD GATES 判定。全程约 35 分钟、约 160 次调用。
+
+## 第 2 档补跑结果（2026-09-05，新 key，成本受控模式）
+- `run_live.py --frozen-only --rounds 3 --no-judges`：12 冻结场景 × 3 轮 = 36 次生成调用，**0 失败**
+- 契约解析率 **36/36 = 1.000**（三轮全部，硬门槛 100% 达成）
+- 自我认知/诚实清单 **9/9 = 1.000**
+- response_format JSON 强制模式实证根治"纯文本滑落"（上轮 4 例同源失败本轮 0 例）
+- 双评审按要求跳过（额度受限）；评审档与 30 场景全量 DoD 待额度宽裕时按上文手册补跑
+- evidence: live_20260905_004408.json（第 1 档 12 调用）、live_20260905_010339.json（第 2 档 36 调用）
