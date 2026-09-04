@@ -40,7 +40,9 @@ from acceptance.gates.g1_memory import GOLDEN  # noqa: E402
 # 三个评测集。名字固定，报告与断言都按这三个名字引用。
 CORPORA = {"golden": GOLDEN, "v1": HOLDOUT_GOLDEN, "v2": HOLDOUT_V2}
 
-WEIGHTS = ("W_BIGRAM", "W_CONCEPT", "W_PREFERENCE", "W_TRANSIENT")
+# 权重名、88 格网格与扰动的施加方式只在 tests/weight_grid.py 定义一次（M14：
+# 复现脚本必须能产出表格里的每一行；两处各写一份枚举逻辑，两份 88 行迟早对不上）。
+from weight_grid import WEIGHTS, build_grid, perturbed  # noqa: E402
 
 
 def _hits(corpus: list[dict], ranker=mr.rank) -> list[bool]:
@@ -244,25 +246,7 @@ def report_ablation() -> None:
 # ---------------------------------------------------------------------------
 # weight sensitivity
 # ---------------------------------------------------------------------------
-def _perturbed(factor_map: dict[str, float]):
-    """Context manager that scales module weights by the given factors."""
-    patches = [
-        mock.patch.object(mr, name, getattr(mr, name) * factor)
-        for name, factor in factor_map.items()
-    ]
-    for patch in patches:
-        patch.start()
-    return patches
-
-
-def _stop(patches) -> None:
-    for patch in patches:
-        patch.stop()
-
-
 def report_sensitivity() -> None:
-    import itertools
-
     print("=" * 118)
     print("权重敏感性：单权重扰动 + 全体缩放 + 结构性组合网格（×0.5 / ×1 / ×2），三集")
     print("=" * 118)
@@ -282,20 +266,8 @@ def report_sensitivity() -> None:
     print("分差才量「一个已正确的判定离翻转有多远」——后者才是权重鲁棒性的含义。")
     print()
 
-    singles: list[tuple[str, dict[str, float]]] = []
-    for name in WEIGHTS:
-        for factor in (0.5, 2.0):
-            singles.append((f"{name} x{factor}", {name: factor}))
-
-    uniform: list[tuple[str, dict[str, float]]] = []
-    grid: list[tuple[str, dict[str, float]]] = []
-    for factors in itertools.product((0.5, 1.0, 2.0), repeat=len(WEIGHTS)):
-        if all(factor == 1.0 for factor in factors):
-            continue                      # 基线不算扰动（M16）
-        label = " ".join(f"{short}x{factor:g}" for short, factor in zip(
-            ("BIG", "CON", "PRE", "TRA"), factors))
-        target = uniform if len(set(factors)) == 1 else grid
-        target.append((label, dict(zip(WEIGHTS, factors))))
+    grouped = build_grid()
+    singles, uniform, grid = grouped["singles"], grouped["uniform"], grouped["grid"]
 
     def run(title, configs, show_all=True):
         print("=" * 118)
@@ -307,8 +279,7 @@ def report_sensitivity() -> None:
             print("-" * 118)
         records = []
         for label, factor_map in configs:
-            patches = _perturbed(factor_map)
-            try:
+            with perturbed(mr, factor_map):
                 cells, hit_margins, all_margins, flips = [], [], [], []
                 for name, corpus in CORPORA.items():
                     flags = _hits(corpus)
@@ -323,8 +294,6 @@ def report_sensitivity() -> None:
                     cells.append(f"{hits:>3}/{len(corpus):<3}{'*' if hits != base[name] else ' '}")
                     all_margins.append((all_m, name, -1))
                     hit_margins.append((hit_m, name, hit_i))
-            finally:
-                _stop(patches)
             worst_hit = min(hit_margins)
             worst_all = min(all_margins)
             records.append((label, worst_hit[0], worst_hit[1], worst_hit[2], cells,
