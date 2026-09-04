@@ -4,18 +4,22 @@
 数字还在变），而这三组分析必须可被 QA 独立复跑——脚本本身就是可审计的痕迹，报告
 里的每个数字都应该能由 `./.venv/bin/python tests/report_retrieval.py <mode>` 重现。
 
-四个模式：
+五个模式：
   v2          逐对命中明细 + 宏平均 P/R + 按 D1-D11 分组的失败分布
   ablation    逐层消融：kill L1-L5 各自在 golden + v1 + v2 上的命中数与判定翻转
   sensitivity 权重敏感性：单权重扰动 + 全组合网格，找实测最恶劣方向
   lexicon     词典审计对照表：按规则新增的词 × 恰好落在 v2 里的词 × 仍未覆盖
               的对，外加「刻意不收的词若收进来会翻转几对」的反事实
+  l2          RC-2 长度稀释的判定依据：四种 L2 归一化口径 × 三集，逐对 L2 比值，
+              外加 W_BIGRAM 从 0 扫到 3 倍——bigram_similarity 的 docstring 引的
+              每个数字都出自本模式
 
-四个模式共用同一套评测口径（从 tests/test_holdout_v2.py import），所以「口径」只有
+五个模式共用同一套评测口径（从 tests/test_holdout_v2.py import），所以「口径」只有
 一处定义；分析脚本自己另写一份口径就等于制造第二处会漂移的真相。
 """
 from __future__ import annotations
 
+import math
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -265,7 +269,7 @@ def report_sensitivity() -> None:
         print("=" * 118)
         if show_all:
             print(f"{'config':<34} " + " ".join(f"{name:>10}" for name in CORPORA)
-                  + f" {'min_margin(仅命中对)':>34}")
+                  + f" {'min_margin(仅命中对)':>40}")
             print("-" * 118)
         records = []
         for label, factor_map in configs:
@@ -539,12 +543,169 @@ def report_lexicon() -> None:
     print("多少分，以及那些分会不会同时污染 golden 与 v1。")
 
 
+# ---------------------------------------------------------------------------
+# RC-2: L2 normalization variants
+# ---------------------------------------------------------------------------
+# 四种口径。cosine 是现状；damp 是审查发现 M3 当时驳回的那个改法，这里作为
+# 对照组一并实测，把「驳回」从定性判断变成有数字的判断；overlap 与 qcontain
+# 是本轮新试的两个**不引入任何新参数**的替代归一化。
+#   cosine    dot / (||q|| * ||f||)                      对称归一化
+#   overlap   dot / min(||q||, ||f||)                    Szymkiewicz-Simpson 重叠系数
+#   qcontain  dot / ||q||                                查询包含度（非对称）
+#   damp      cosine * min(len)/max(len)                 余弦再乘长度阻尼
+def _dot(left, right) -> int:
+    return sum(count * right[gram] for gram, count in left.items())
+
+
+def _cnorm(counter) -> float:
+    return math.sqrt(sum(count * count for count in counter.values()))
+
+
+def _pick_order(a, b):
+    """Replicate _bigram_profile's degradation rule so the variants differ only
+    in the denominator."""
+    n = 2 if min(len(a.normalized), len(b.normalized)) >= 2 else 1
+    return (a.bigrams, b.bigrams) if n == 2 else (a.unigrams, b.unigrams)
+
+
+def _l2_variant(kind: str):
+    def variant(a, b) -> float:
+        if not a.normalized or not b.normalized:
+            return 0.0
+        left, right = _pick_order(a, b)
+        if not left or not right:
+            return 0.0
+        dot = _dot(left, right)
+        if dot == 0:
+            return 0.0
+        if left == right:
+            return 1.0
+        nl, nr = _cnorm(left), _cnorm(right)
+        if kind == "cosine":
+            return dot / (nl * nr)
+        if kind == "overlap":
+            return min(1.0, dot / min(nl, nr))
+        if kind == "qcontain":
+            return min(1.0, dot / nl)
+        if kind == "damp":
+            la, lb = len(a.normalized), len(b.normalized)
+            return (dot / (nl * nr)) * (min(la, lb) / max(la, lb))
+        raise AssertionError(kind)
+
+    return variant
+
+
+L2_KINDS = ("cosine", "overlap", "qcontain", "damp")
+
+
+def _fmt(indices: list[int]) -> str:
+    """Compact flip list for the wide tables: [] / [21] / [2,3,4,5,10,11]."""
+    return "[" + ",".join(str(i) for i in indices) + "]"
+
+
+def _miss_indices(corpus: list[dict], flags: list[bool]) -> list[int]:
+    """Pairs that have a correct answer but did not get it at top-1."""
+    return [i for i, (pair, hit) in enumerate(zip(corpus, flags))
+            if pair["relevant"] and not hit]
+
+
+def report_l2() -> None:
+    base = {name: _hits(corpus) for name, corpus in CORPORA.items()}
+
+    print("=" * 132)
+    print("RC-2 判定依据 一：四种 L2 归一化口径 × 三集")
+    print("=" * 132)
+    print(f"{'口径':<10}" + "".join(f"{n:>40}" for n in CORPORA))
+    print("-" * 132)
+    for kind in L2_KINDS:
+        patched = mr._bigram_profile if kind == "cosine" else _l2_variant(kind)
+        with mock.patch.object(mr, "_bigram_profile", patched):
+            hits = {n: _hits(c) for n, c in CORPORA.items()}
+            cells = []
+            for n in CORPORA:
+                flips = [i for i, (b, a) in enumerate(zip(base[n], hits[n])) if b != a]
+                gained = [i for i in flips if hits[n][i]]
+                lost = [i for i in flips if not hits[n][i]]
+                margin = _min_margin(CORPORA[n], hits_only=True)[0]
+                cells.append(f"{sum(hits[n])}/{len(CORPORA[n])}"
+                             f" +{_fmt(gained)} -{_fmt(lost)} m={margin:.4f}")
+        tag = "  <- 现状" if kind == "cosine" else ""
+        print(f"{kind:<10}" + "".join(f"{c:>40}" for c in cells) + tag)
+    print("-" * 132)
+    print("m 是**命中对**的最小分差（M15 的口径）。它塌到 0.0000 意味着「赢的那一对」")
+    print("是靠候选顺序撞对的，不是靠结构——这正是 overlap / qcontain 的实测结果。")
+
+    print()
+    print("=" * 132)
+    print("RC-2 判定依据 二：v2 未命中对在四种口径下的 L2（干扰 / 应答 / 比值）")
+    print("=" * 132)
+    misses = _miss_indices(HOLDOUT_V2, base["v2"])
+    print(f"{'#':>3} {'|干|':>4} {'|应|':>4} " + " ".join(f"{k:>26}" for k in L2_KINDS))
+    print("-" * 132)
+    tally = {k: [0, 0, 0] for k in L2_KINDS}          # favour / tie / against
+    for i in misses:
+        pair = HOLDOUT_V2[i]
+        query = _text(pair["query"])
+        relevant = {_text(f) for f in pair["relevant"]}
+        stored = [_text(f) for f in pair["stored"]]
+        answer = next(f for f in stored if f in relevant)
+        distractor = mr.rank(query, stored)[0][0]
+        cells = []
+        for kind in L2_KINDS:
+            fn = mr._bigram_profile if kind == "cosine" else _l2_variant(kind)
+            d = fn(mr._profile(query), mr._profile(distractor))
+            a = fn(mr._profile(query), mr._profile(answer))
+            ratio = (a / d) if d else float("inf")
+            if ratio > 1.0001:
+                tally[kind][0] += 1
+                mark = ">"
+            elif ratio < 0.9999:
+                tally[kind][2] += 1
+                mark = "<"
+            else:
+                tally[kind][1] += 1
+                mark = "="
+            cells.append(f"{d:.4f}/{a:.4f}{mark}{ratio:5.2f}")
+        print(f"{i:>3} {len(mr.normalize(distractor)):>4} {len(mr.normalize(answer)):>4} "
+              + " ".join(f"{c:>26}" for c in cells))
+    print("-" * 132)
+    for kind in L2_KINDS:
+        f, t, a = tally[kind]
+        print(f"  {kind:<9} L2 站应答一边 {f} 对 / 弃权 {t} 对 / 仍偏干扰 {a} 对")
+    print("比值=1.00 表示 L2 弃权：长度偏置被消掉了，但胜负被推给 L3，而 L3 是对称")
+    print("桥接——任何给出同槽位具体值的干扰项一样能桥到查询的槽位上。")
+
+    print()
+    print("=" * 132)
+    print("RC-2 判定依据 三：把 L2 整层的权重从 0 扫到 3 倍")
+    print("=" * 132)
+    print(f"{'W_BIGRAM':>9} " + "".join(f"{n:>40}" for n in CORPORA))
+    print("-" * 132)
+    for weight in (0.0, mr.W_BIGRAM / 2, mr.W_BIGRAM, mr.W_BIGRAM * 2, mr.W_BIGRAM * 3):
+        with mock.patch.object(mr, "W_BIGRAM", weight):
+            hits = {n: _hits(c) for n, c in CORPORA.items()}
+            cells = []
+            for n in CORPORA:
+                flips = [i for i, (b, a) in enumerate(zip(base[n], hits[n])) if b != a]
+                gained = [i for i in flips if hits[n][i]]
+                lost = [i for i in flips if not hits[n][i]]
+                margin = _min_margin(CORPORA[n], hits_only=True)[0]
+                cells.append(f"{sum(hits[n])}/{len(CORPORA[n])}"
+                             f" +{_fmt(gained)} -{_fmt(lost)} m={margin:.4f}")
+        tag = "  <- 现状" if weight == mr.W_BIGRAM else ""
+        print(f"{weight:>9.2f} " + "".join(f"{c:>40}" for c in cells) + tag)
+    print("-" * 132)
+    print("W_BIGRAM=0 那一行是本判定的关键读数：拿掉 L2 的长度偏置的同时也拿掉了")
+    print("L2 的内容信号。两者在 v2 上的价签相差多少，就是「RC-2 值不值得修」的答案。")
+
+
 MODES = {
     "v2": report_v2,
     "diagnose": report_diagnose,
     "ablation": report_ablation,
     "sensitivity": report_sensitivity,
     "lexicon": report_lexicon,
+    "l2": report_l2,
 }
 
 if __name__ == "__main__":
