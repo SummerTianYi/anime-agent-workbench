@@ -185,7 +185,7 @@ def report_ablation() -> None:
     print("=" * 100)
     baseline = {name: _hits(corpus) for name, corpus in CORPORA.items()}
     print(f"{'layer':<16} " + " ".join(f"{name:>26}" for name in CORPORA))
-    print(f"{'':<16} " + " ".join(f"{'hits  flips  margin':>26}" for _ in CORPORA))
+    print(f"{'':<16} " + " ".join(f"{'hits  flips  margin(all)':>26}" for _ in CORPORA))
     print("-" * 100)
     for name, corpus in CORPORA.items():
         base_margin, _, excluded = _min_margin(corpus)
@@ -208,6 +208,37 @@ def report_ablation() -> None:
     print("flips 列格式：翻转总数(转对+/转错-)。零翻转 = 该层在这三个集上无判定力。")
     print("注意区分两个不同的量：**判定力**（flips）与**分差贡献**（margin 降幅）。")
     print("一层可以零翻转却大幅拉开分差（鲁棒性贡献），也可以翻转很多而分差不变。")
+
+    # 第二段：M15 口径的「命中对最小分差」+ owner 对编号。
+    # 加这一段的原因（本轮实测逼出来的）：层1 与层5 在三集上都是**零翻转**，按上面
+    # 那张表读会得出「这两层无判定力」的结论，而真实情况是层5 拿掉之后 v2 的 #0
+    # 分差从 0.1773 塌到 0.0023（降 98.7%）——判定没翻，但只差一点点。阶段三要重写
+    # 文档归因，「判定力」与「分差贡献」必须分开量化，否则会把鲁棒性贡献记成零。
+    print()
+    print("=" * 100)
+    print("各层的「命中对最小分差」（M15 口径）与其 owner 对编号")
+    print("=" * 100)
+    print("上表的 margin(all) 是**全体**可判定对的最小分差，量「哪对最接近随机」；这一段")
+    print("是**命中对**的最小分差，量「一个已正确的判定离翻转有多远」——M15 关心的是后者。")
+    print("零翻转的层（本轮实测是层1 与层5）只在这一段里看得出价值：它们不改判定，却是")
+    print("分差的主要来源，拿掉之后某个已正确的判定会逼近翻转。@ 后是该分差的 owner 对。")
+    print("-" * 100)
+    print(f"{'layer':<16} " + " ".join(f"{name:>22}" for name in CORPORA))
+    print("-" * 100)
+
+    def _margin_cells() -> list[str]:
+        cells = []
+        for corpus in CORPORA.values():
+            gap, owner, _ = _min_margin(corpus, hits_only=True)
+            cells.append(f"{gap:.4f} @#{owner}" if owner >= 0 else "  n/a")
+        return cells
+
+    print(f"{'BASELINE':<16} " + " ".join(f"{c:>22}" for c in _margin_cells()))
+    for label, attr, stub in _LAYERS:
+        with mock.patch.object(mr, attr, stub):
+            cells = _margin_cells()
+        print(f"{label:<16} " + " ".join(f"{c:>22}" for c in cells))
+    print("-" * 100)
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +266,10 @@ def report_sensitivity() -> None:
     print("=" * 118)
     print("权重敏感性：单权重扰动 + 全体缩放 + 结构性组合网格（×0.5 / ×1 / ×2），三集")
     print("=" * 118)
-    base = {name: sum(_hits(corpus)) for name, corpus in CORPORA.items()}
+    base_flags = {name: _hits(corpus) for name, corpus in CORPORA.items()}
+    base = {name: sum(flags) for name, flags in base_flags.items()}
+    # 跨三段全部扰动累计「每一对被翻转了几次、被哪些配置翻转」，末尾汇总成脆弱对榜。
+    flip_log: dict[tuple[str, int], list[str]] = {}
     print("BASELINE（不计入扰动，审查发现 M16 的计数口径）：")
     for name, corpus in CORPORA.items():
         all_m, _, all_x = _min_margin(corpus)
@@ -275,9 +309,15 @@ def report_sensitivity() -> None:
         for label, factor_map in configs:
             patches = _perturbed(factor_map)
             try:
-                cells, hit_margins, all_margins = [], [], []
+                cells, hit_margins, all_margins, flips = [], [], [], []
                 for name, corpus in CORPORA.items():
-                    hits = sum(_hits(corpus))
+                    flags = _hits(corpus)
+                    hits = sum(flags)
+                    flip = [(i, b, a) for i, (b, a)
+                            in enumerate(zip(base_flags[name], flags)) if b != a]
+                    flips.append((name, flip))
+                    for i, _b, _a in flip:
+                        flip_log.setdefault((name, i), []).append(label)
                     all_m, _, _ = _min_margin(corpus)
                     hit_m, hit_i, _ = _min_margin(corpus, hits_only=True)
                     cells.append(f"{hits:>3}/{len(corpus):<3}{'*' if hits != base[name] else ' '}")
@@ -288,7 +328,7 @@ def report_sensitivity() -> None:
             worst_hit = min(hit_margins)
             worst_all = min(all_margins)
             records.append((label, worst_hit[0], worst_hit[1], worst_hit[2], cells,
-                            worst_all[0], worst_all[1]))
+                            worst_all[0], worst_all[1], flips))
             if show_all:
                 print(f"{label:<34} " + " ".join(f"{cell:>10}" for cell in cells)
                       + f" {worst_hit[0]:>12.4f} ({worst_hit[1]} #{worst_hit[2]})"
@@ -303,6 +343,17 @@ def report_sensitivity() -> None:
         for record in flipped[:15]:
             print(f"    {record[0]:<34} " + " ".join(f"{cell:>10}" for cell in record[4])
                   + f"  仅命中对分差={record[1]:.4f}")
+            for name, flip in record[7]:
+                if not flip:
+                    continue
+                gained = [i for i, _b, a in flip if a]
+                lost = [i for i, _b, a in flip if not a]
+                parts = []
+                if gained:
+                    parts.append(f"转对 {gained}")
+                if lost:
+                    parts.append(f"转错 {lost}")
+                print(f"{'':<38}{name} 翻转 {len(flip)} 对：" + "，".join(parts))
         top = sorted(records, key=lambda record: record[1])[:5]
         print("最恶劣前 5（按仅命中对分差升序）：")
         for record in top:
@@ -318,6 +369,28 @@ def report_sensitivity() -> None:
     # 它只是“把所有分差除以 2”，与哪个权重重要无关）。
     run("全体缩放（非结构性，分差同比缩放是算术必然）", uniform)
     run("结构性组合网格（相对权重变化，排除全体缩放）", grid)
+
+    # 脆弱对榜：跨三段全部扰动，统计每一对被翻转的次数与触发它的配置。
+    # 加这一段的原因（本轮实测逼出来的）：「最恶劣组合」只告诉你该防哪一组权重，
+    # 不告诉你**哪一对判定**在那组权重下最先塌。本轮实测 9 个配置让 v2 从 24 掉到
+    # 22，掉的都是 #7 与 #23——两对都靠 L4 的极性加分取胜，W_PREFERENCE 减半就守
+    # 不住。这条信息是阶段三写权重归因时唯一能落地的抓手。
+    total = len(singles) + len(uniform) + len(grid)
+    print("=" * 118)
+    print(f"脆弱对榜：跨全部 {total} 个扰动被翻转的对（按被翻转次数降序；基线不计入，M16 口径）")
+    print("=" * 118)
+    if not flip_log:
+        print("  无任何对被翻转：全部判定在 88 个扰动下都稳。")
+    else:
+        for (name, index), labels in sorted(flip_log.items(),
+                                            key=lambda kv: (-len(kv[1]), kv[0][0], kv[0][1])):
+            query = _text(CORPORA[name][index].get("query"))
+            tail = labels[0] if len(labels) == 1 else f"{labels[0]} 等 {len(labels)} 个"
+            print(f"  {name:<7} #{index:<3} 被 {len(labels):>2}/{total} 个扰动翻转   "
+                  f"query={query!r}   触发例：{tail}")
+    print("-" * 118)
+    print("读法：次数越多说明该对的判定越依赖权重的具体取值而不是依赖结构。真正稳健的")
+    print("判定应当在全部扰动下都不翻转；上榜的对就是权重调参时必须重新复核的对象。")
 
 
 # ---------------------------------------------------------------------------
