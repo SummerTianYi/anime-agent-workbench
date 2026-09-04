@@ -1,0 +1,52 @@
+==============================================================================
+ROUND 1 / MODE normal
+cmd       : ./.venv/bin/python acceptance/run_all.py
+commit    : d6868c654a821abf7920d249683837db6068a87a
+start     : 2026-09-04 11:02:13 +0100
+end       : 2026-09-04 11:02:13 +0100
+==============================================================================
+--- stdout ---
+PASS     g0_environment
+         G0_ENVIRONMENT: PASS
+PASS     g0_secrets
+         G0_SECRETS: PASS
+PASS     g0_freeze
+         G0_FREEZE: PASS
+PASS     g1_contract
+         G1_CONTRACT: PASS
+PASS     g1_memory
+         G1_MEMORY: PASS
+PENDING  g1_permissions
+         evaluate() not implemented (Task C)
+         G1_PERMISSIONS: PENDING
+PENDING  g1_tools
+         openai_schema/execute not implemented (Task E)
+         G1_TOOLS: PENDING
+PASS     g3_simulate
+         G3_SIMULATE: PASS
+evidence: evidence/run_20260904_110213.json
+VERDICT: PENDING-OK
+--- stderr ---
+(empty)
+===EXIT=0===
+evidence JSON produced by this invocation: ['run_20260904_110213.json']
+
+==============================================================================
+ROUND 1 / independent re-run of the target gate and the formerly-defective gate
+==============================================================================
+------------------------------------------------------------------------------
+GATE g1_memory   cmd: ./.venv/bin/python acceptance/gates/g1_memory.py
+timestamp  : 2026-09-04 11:02:17 +0100
+--- stdout ---
+G1_MEMORY: PASS
+--- stderr ---
+(empty)
+===EXIT=0===
+------------------------------------------------------------------------------
+GATE g0_freeze   cmd: ./.venv/bin/python acceptance/gates/g0_freeze.py
+timestamp  : 2026-09-04 11:02:17 +0100
+--- stdout ---
+G0_FREEZE: PASS
+--- stderr ---
+(empty)
+===EXIT=0===
