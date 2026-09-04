@@ -353,6 +353,7 @@ class DocumentedLimitationTests(unittest.TestCase):
                 long_score / short_score, expected_ratio, delta=0.01,
                 msg="L2 的稀释幅度变了：归一化口径被动过，RC-2 的判定记录需要重写",
             )
+
     def test_single_char_members_cross_match_into_other_classes(self):
         """N1（本轮新发现）：单字 member 会被无关复合词误命中。
 
@@ -367,7 +368,7 @@ class DocumentedLimitationTests(unittest.TestCase):
              且是必需证据（「用户养了一只猫」没有 head 词，全靠 member 命中）。
              「哪些单字有歧义」需要一份复合词表才能回答，那与本仓「纯标准库、
              禁分词库」的约束冲突，也会把反过拟合审计的分母搅乱。
-          2. 无实测收益。三个集合计 100 对，修它翻转 0 对。
+          2. 无实测收益。三个集合计 52 对语料（查询×候选比较 130 次），修它翻转 0 对。
           3. 有实测风险。颜色类的真实命中路径（「藏青色」里的「青」）依赖单字
              member，收紧会直接伤到 D11 那一对。
         将来若引入词级切分，这条会变红提醒同步文档。
@@ -516,7 +517,7 @@ class PolarityVerbRuleTests(unittest.TestCase):
     却漏掉后者，没有任何语言学依据。补全规则产物后实测（三集，本机）：golden 8/8、
     v1 12/12 均零翻转，v2 23/32 -> 24/32（只翻转 #7，且命中对最小分差 0.0067 不变）。
     反 Goodhart 审计：规则产出 34 个新词（不+V 17 个、爱+V 17 个），其中恰好落在 v2
-    里的只有「不喝」1 个，占比 0.029；另外 33 个在三个集合计 100 对上**零翻转**——
+    里的只有「不喝」1 个，占比 0.029；另外 33 个在三个集合计 52 对语料上**零翻转**——
     这一点是本组测试存在的意义：如果只加「不喝」，它与「看哪对失败就补哪个词」在
     代码上无法区分。
     """
