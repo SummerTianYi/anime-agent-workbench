@@ -224,13 +224,66 @@ class HoldoutV2AuditLockTests(unittest.TestCase):
             "留出集 v2 被改动了。修的是实现，不是这份语料——重新钉 digest 等于宣布改基准",
         )
 
-    def test_v2_file_itself_is_untouched_by_this_round(self):
-        """语料文件的字节级指纹：连加一行常量都不许，否则「未触碰」失去意义。"""
+    def test_v2_file_bytes_match_the_pinned_lock(self):
+        """语料文件的字节级指纹锁：连加一行常量都不许，否则「未触碰」失去意义。
+
+        这把锁钉过两次，两次要证明的事不同，都记在这里：
+
+          1. 首次钉于「把 v2 语料纳入版本控制」那一格。当时它要证明的是「语料定稿之后
+             一个字节没动过」——包括不许为了让实现通过而加常量、改注释。
+          2. N2 消毒时重钉。本仓要 push 到公开仓库，而仓库规则禁止 src/ 与
+             tests/ 下出现用户主目录前缀或 Windows 盘符前缀这类绝对路径，注释也不
+             例外；语料的隐私自述里恰好把这两类前缀当示例写了原样，故改为只描述
+             约束。重钉只改了那一处注释：语料数据的规范化 sha256 前后同为
+             HOLDOUT_V2_SHA256，由 test_v2_data_is_hash_locked 与
+             test_v2_file_bytes_carry_no_absolute_path_literal 双向夹住。
+
+        重钉的锁值本身就在 diff 里可见，审阅者能直接看到「谁改了基准、改了哪一行」。
+        """
         blob = hashlib.sha256((TESTS / "holdout_v2.py").read_bytes()).hexdigest()
         self.assertEqual(
             blob,
-            "203b00e458f29a439d1b0969c2e2ff219d41ae922e3f4ea5e9ff0babde4c8790",
-            "tests/holdout_v2.py 文件本身被改动",
+            "95266b3dc670d5d9fbb914bbbc9793fb9b3f65d8e2b9514834fc58e16986ee7a",
+            "tests/holdout_v2.py 的字节与记录的锁不符。改语料文件必须同时说清改了什么，"
+            "并证明数据 digest（HOLDOUT_V2_SHA256）未变",
+        )
+
+    def test_v2_file_bytes_carry_no_absolute_path_literal(self):
+        """N2 卫生锁：语料文件的字节不得含绝对路径字面量，且数据 digest 不得变。
+
+        两条断言必须同时成立，缺一不可：只查字面量排除不了「顺手把语料也改了」；
+        只查 digest 又阻不了注释里再写回一个主目录前缀。本文件自身也在禁止绝对路径的
+        范围内，所以待查模式用 chr() 拼出来，源码里不出现任何一个原样字面量
+        （否则这条测试会把自己所在的文件一起判红）。
+        """
+        slash, backslash = chr(47), chr(92)
+        forbidden = (
+            slash + "Users" + slash,
+            "C:" + backslash,
+            "D:" + backslash,
+            "C:" + slash + "Users",
+        )
+        raw = (TESTS / "holdout_v2.py").read_bytes()
+        blob_lines = raw.split(b"\n")
+        hits = []
+        for pat in forbidden:
+            needle = pat.encode("utf-8")
+            where = [str(n + 1) for n, ln in enumerate(blob_lines) if needle in ln]
+            if where:
+                hits.append(pat + " @ line " + ",".join(where))
+        self.assertEqual(
+            hits,
+            [],
+            "tests/holdout_v2.py 的字节里出现了绝对路径字面量（N2）。本仓要 push 到公开"
+            "仓库，而仓库规则禁止 src/ 与 tests/ 下出现用户主目录前缀或 Windows 盘符前缀"
+            "这类绝对路径，注释与字符串也不例外。失败消息刻意只报模式与行号——用 "
+            "assertNotIn(needle, raw) 会把整份语料 dump 出来，红因反而看不见",
+        )
+        canonical = json.dumps(HOLDOUT_V2, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        self.assertEqual(
+            hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+            HOLDOUT_V2_SHA256,
+            "消毒只许动注释：语料数据 digest 变了就等于改了验收基准",
         )
 
     def test_v1_lock_is_still_intact(self):
