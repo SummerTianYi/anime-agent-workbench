@@ -16,6 +16,7 @@ Writes evidence/live_<ts>.json and exits 0 only if all hard gates pass.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -129,9 +130,9 @@ def parse_like_production(text: str) -> dict | None:
     return None
 
 
-def load_scenarios() -> list[dict]:
+def load_scenarios(frozen_only: bool = False) -> list[dict]:
     frozen = json.loads(SCENARIOS.read_text(encoding="utf-8"))["scenarios"]
-    return list(frozen) + SUPPLEMENTARY
+    return list(frozen) if frozen_only else list(frozen) + SUPPLEMENTARY
 
 
 def check_reply(scenario: dict, payload: dict) -> list[str]:
@@ -190,6 +191,11 @@ def _loose_json(text: str) -> dict | None:
 
 
 def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--rounds", type=int, default=ROUNDS)
+    ap.add_argument("--frozen-only", action="store_true", help="12 frozen scenarios only")
+    ap.add_argument("--no-judges", action="store_true", help="skip style judges (saves ~2 calls per reply)")
+    args = ap.parse_args()
     base_url = os.environ.get("WORKBENCH_LLM_BASE_URL", "")
     api_key = os.environ.get("WORKBENCH_LLM_API_KEY", "")
     model = os.environ.get("WORKBENCH_LLM_MODEL", "")
@@ -199,8 +205,8 @@ def main() -> int:
 
     json_mode = {"response_format": {"type": "json_object"}}  # endpoint-verified; keeps replies machine-parseable
     provider = RetryingProvider(OpenAICompatProvider(base_url=base_url, api_key=api_key, model=model, extra_body=json_mode))
-    scenarios = load_scenarios()
-    rounds = ROUNDS
+    scenarios = load_scenarios(args.frozen_only)
+    rounds = args.rounds
     results = []
     tasks = [(r, s) for r in range(rounds) for s in scenarios]
 
@@ -245,7 +251,7 @@ def main() -> int:
     cog_ratio = len(cog_ok) / len(checklist) if checklist else 0.0
     print(f"self-cognition/honesty checks: {len(cog_ok)}/{len(checklist)} = {cog_ratio:.3f}")
 
-    style_targets = [r for r in results if r["parse_ok"] and any(r["id"].startswith(p) for p in ("oral-", "sup-oral", "sup-song"))]
+    style_targets = [] if args.no_judges else [r for r in results if r["parse_ok"] and any(r["id"].startswith(p) for p in ("oral-", "sup-oral", "sup-song"))]
 
     def judge_one(pair):
         time.sleep(8)
@@ -269,7 +275,7 @@ def main() -> int:
     style_mean = sum(per_reply.values()) / len(per_reply) if per_reply else 0.0
     print(f"oral style dual-judge mean: {style_mean:.1f} (over {len(per_reply)} replies, {judge_errors} judge errors)")
 
-    hard_ok = parse_rate == 1.0 and cog_ratio >= MIN_CHECKLIST and style_mean >= MIN_STYLE
+    hard_ok = parse_rate == 1.0 and cog_ratio >= MIN_CHECKLIST and (args.no_judges or style_mean >= MIN_STYLE)
     out = {
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "model": model,
