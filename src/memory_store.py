@@ -1,3 +1,4 @@
+# main-repo-target: services/agent-core/agent_core/storage.py (MemoryStore, line 19)
 """Task B working file: Tianyi's long-term memory store.
 
 Pilot (already implemented): session-scoped fact roundtrip on sqlite —

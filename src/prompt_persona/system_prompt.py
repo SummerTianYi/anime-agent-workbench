@@ -1,3 +1,4 @@
+# main-repo-target: services/agent-core/agent_core/harness.py (BASE_SYSTEM_PROMPT, line 43)
 """Task A working file: the active persona system prompt.
 
 Task A rewrite of the vendor baseline. Invariants enforced by

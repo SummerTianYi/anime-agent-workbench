@@ -114,7 +114,8 @@
 | 1 | HIGH | **密闭闸门对任务 A 的牙齿是不完整的**：演练证实 g1_contract + MockProvider 只能检出"身份事实丢失"（PROMPT_MISSING 机制），删除诚实守卫或口语规则后闸门依旧 PASS——MockProvider 回复写死，不真正读提示词 | 缓解：诚实守卫与口语风格的执行全部落在实况评测（真实 LLM + sup-cog 认知清单 + 双评审），run_live.py 因此是任务 A 的承重验收而非可选项；密闭闸门只当"事实防火墙"用 |
 | 2 | HIGH | GLM 端点在并发下大幅限流（4 worker 时 96 次调用 88 次 429），首轮实况评测 88% 调用失败 | 已修：run_live.py 加 RetryingProvider（指数退避）+ 单工 + 5 秒节奏；探针验证 1 worker 5s 间隔 6/6 通过 |
 | 3 | MEDIUM | 实况评测的 DeepSeek 备用端点 key 为空（.env DEEPSEEK_API_KEY empty），401 | 记录：本机仅 GLM 可用；限流适配后可行。DoD 补跑机制（README"在有 key 的环境补跑"）不受影响 |
-| 4 | LOW | 双评审用同一 LLM 扮演两个人格，独立性弱于真双模型 | 记录：两个评审 rubric 正交（自然度 vs 去AI味），分数取均值；若需更强独立性可各配一个 provider，接口已留好 |
+| 4 | HIGH | 第三轮跑到 78 分钟无产出；GLM 429 响应正文显示 `code 1113 余额不足或无可用资源包,请充值` —— 是账户额度硬耗尽，非小时级限流窗口，探针等待 2 小时无意义 | 已识别并停止消耗：终止评测与探针循环；已验证端点支持 response_format JSON 强制（治本"纯文本滑落"），补跑手册（一条命令）写入 EVIDENCE.md；等待充值或换任意 OpenAI 兼容 key |
+| 5 | LOW | 双评审用同一 LLM 扮演两个人格，独立性弱于真双模型 | 记录：两个评审 rubric 正交（自然度 vs 去AI味），分数取均值；若需更强独立性可各配一个 provider，接口已留好 |
 
 ### 视角
 - 正确性：改写后 g1_contract 12 冻结场景密闭评测 PASS；REQUIRED_* 常量未动。

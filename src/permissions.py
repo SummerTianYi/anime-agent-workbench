@@ -1,3 +1,4 @@
+# main-repo-target: services/agent-core/agent_core/permissions.py (new module)
 """Task C working file: the tool/action permission layer (deny by default).
 
 Skeleton. Task C implements PermissionEngine.evaluate per

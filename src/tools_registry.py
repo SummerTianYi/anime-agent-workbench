@@ -1,3 +1,4 @@
+# main-repo-target: services/agent-core/agent_core/tools_registry.py (new module)
 """Task E working file: read-only tool registry (allow-listed, traversal-safe).
 
 Skeleton. Task E implements the registry per tasks/E-readonly-tools/SPEC.md;

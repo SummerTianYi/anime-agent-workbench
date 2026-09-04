@@ -35,3 +35,21 @@
 - 自我认知正确回应（sup-cog-07）："谢谢夸奖……不过我是住在你桌面上的 3D 模型，没有'真人'这一说哦。"（JSON 完整，emotion=shy）
 - 二轮滑落样例（oral-02）："给你讲一个～为什么饼干要去看医生？……"——纯文本无 JSON，触发 response_format 根治路径
 
+
+## 换 key 补跑手册（额度恢复后执行）
+实况评测硬门槛（解析率 100% / 认知 ≥95% / 双评审 ≥90）因 GLM 账户额度耗尽（error 1113：余额不足或无可用资源包，请充值）未完成最终判定。换 key 或充值后，任选其一：
+
+```bash
+# 方式一：环境变量直传（任意 OpenAI 兼容端点）
+WORKBENCH_LLM_BASE_URL=https://api.deepseek.com \
+WORKBENCH_LLM_API_KEY=sk-xxx \
+WORKBENCH_LLM_MODEL=deepseek-chat \
+python acceptance/evals/run_live.py
+
+# 方式二：GLM 充值后（沿用主仓 .env 配置）
+set -a && . <主仓路径>/.env && set +a
+export WORKBENCH_LLM_BASE_URL="$GLM_BASE_URL" WORKBENCH_LLM_API_KEY="$GLM_API_KEY" WORKBENCH_LLM_MODEL="$GLM_MODEL"
+python acceptance/evals/run_live.py
+```
+
+脚本已内置：单工 + 8 秒节奏（防限流）、429/超时指数退避重试、response_format JSON 强制、逐调用进度日志（evidence/live_progress.log）、完成自动写 evidence/live_*.json 并输出 HARD GATES 判定。全程约 35 分钟、约 160 次调用。
