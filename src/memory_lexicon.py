@@ -69,8 +69,12 @@ CONCEPT_LEXICON: Mapping[str, ConceptClass] = MappingProxyType({
     #    的分类词（彩色/无色/原色/暖色/冷色/深色/浅色/亮色/暗色/底色）。
     # 刻意不收：色号、色差、色调、配色——它们是「关于颜色的谈论」而不是
     #    颜色取值，收进来会让任何讨论设计的文本都桥接到颜色类。
-    # 已知局限（N1，见 test_retrieval_structure）：R1 全是单字，中文单字常
-    #    作语素藏在无关复合词里（花粉/银行/黄土），会造成跨类假阳性。
+    # 已知局限（N1，见 test_retrieval_structure 与 test_ranker_mutations 的
+    #    N1SingleCharMemberTests）：R1 全是单字，中文单字常作语素藏在无关复合词里
+    #    （花粉/银行/黄土），会给干扰项加分。但实测删掉这 15 个颜色单字三集命中数
+    #    一个不变、v2 #29「藏青色」仍命中（_masked_scan 最长优先取到长词「藏青」），
+    #    故颜色类单字并非命脉；不能删的是全词典 28 个单字（一刀切会丢 v1 #2/#3、
+    #    v2 #24），因为称呼/生日/宠物/过敏类的部分事实没有 head 词，全靠单字桥接。
     "颜色": ConceptClass(
         name="颜色",
         head=("颜色",),

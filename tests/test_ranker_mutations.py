@@ -36,6 +36,10 @@ from src import memory_ranker as mr  # noqa: E402
 # 两份评测集都从 test_memory_retrieval 取，避免第三份副本静默失同步
 from test_memory_retrieval import GOLDEN, HOLDOUT_GOLDEN  # noqa: E402
 
+# v2 盲测集与它的官方计分器：N1 变异体要断言 v2 #24/#29 的逐对命中
+from holdout_v2 import HOLDOUT_V2  # noqa: E402
+from test_holdout_v2 import score_holdout_v2  # noqa: E402
+
 THRESHOLD = 0.8
 _WEIGHT_NAMES = ("W_BIGRAM", "W_CONCEPT", "W_PREFERENCE", "W_TRANSIENT")
 
@@ -60,6 +64,42 @@ def _min_margin(golden: list[dict]) -> float:
         ranked = mr.rank(str(item["query"]), list(item["stored"]))
         gaps.append(ranked[0][1] - (ranked[1][1] if len(ranked) > 1 else 0.0))
     return min(gaps)
+
+
+def _v2_rows() -> list[dict]:
+    """v2 逐对明细，走 test_holdout_v2 的官方计分器（口径与验收一致）。"""
+    return score_holdout_v2(HOLDOUT_V2)["rows"]
+
+
+def _v2_hit_count() -> int:
+    return sum(1 for row in _v2_rows() if row["hit"])
+
+
+def _single_char_members() -> dict:
+    """每个类的单字 member，按类名归组（N1 的语料面）。
+
+    实测合计 28 个：颜色 15 / 生日 4 / 宠物 4 / 过敏 3 / 称呼 2。
+    """
+    return {
+        name: [m for m in concept.member if len(m) == 1]
+        for name, concept in mr.CONCEPT_LEXICON.items()
+        if any(len(m) == 1 for m in concept.member)
+    }
+
+
+def _without_members(drop: set) -> dict:
+    """整体 rebind：返回一个删掉 drop 里 (类名, member) 对的新词典。
+
+    CONCEPT_LEXICON 是 MappingProxyType 只读视图，不能原地 __setitem__；沿用
+    本文件既有的 dataclasses.replace 整体替换手法，配合 mock.patch.object rebind
+    与 MutationDrill.addCleanup 的 assertIs 复原断言（见 setUp）。
+    """
+    return {
+        name: dataclasses.replace(
+            concept, member=tuple(m for m in concept.member if (name, m) not in drop)
+        )
+        for name, concept in mr.CONCEPT_LEXICON.items()
+    }
 
 
 class MutationDrill(unittest.TestCase):
@@ -227,6 +267,56 @@ class NoMetricTeethTests(MutationDrill):
             self.assertEqual(mr.preference_bonus("用户有什么兴趣", "用户不喜欢摄影"), 0.0)
         self.assertEqual(mr._polarity_hits(mr.normalize("用户不喜欢摄影")), (0, 1))
         self.assertEqual(mr.preference_bonus("用户有什么兴趣", "用户不喜欢摄影"), -0.5)
+
+
+class N1SingleCharMemberTests(MutationDrill):
+    """N1（阶段三自报第 2 条）：把两条实测事实钉成变异测试。
+
+    N1 = 单字 member 跨类误命中（花粉→粉∈颜色、银行→银∈颜色）。旧记载把不修
+    理由写成「收紧会伤到 D11（v2 #29『藏青色』）」，本轮实测推翻：删掉颜色类全部
+    15 个单字后 v2 #29 仍命中，因为 _masked_scan 最长优先贪心取到长词「藏青」而非
+    单字「青」。真正成立的代价在别的类：删掉全词典 28 个单字 member 会丢 v1 #2/#3
+    与 v2 #24。变异体 A 钉「贪心取长词、颜色类可安全收紧」，变异体 B 钉「不能一刀
+    切禁止单字 member」。两者的断言值都先实测再写（见 analysis.md §9.1/§9.2）。
+    """
+
+    def test_variant_a_dropping_color_singles_keeps_all_three_sets_and_v2_29(self):
+        # 基线（实测）：golden 8 / v1 12 / v2 24
+        self.assertEqual(_top1_hits(GOLDEN), 8)
+        self.assertEqual(_top1_hits(HOLDOUT_GOLDEN), 12)
+        self.assertEqual(_v2_hit_count(), 24)
+        color_singles = {("颜色", m) for m in _single_char_members()["颜色"]}
+        self.assertEqual(len(color_singles), 15)  # 红橙黄绿青蓝紫黑白灰粉棕褐金银
+        with mock.patch.object(mr, "CONCEPT_LEXICON", _without_members(color_singles)):
+            # 三集命中数一个都不变——删颜色类单字是零代价的（旧「伤 D11」说法为假）
+            self.assertEqual(_top1_hits(GOLDEN), 8)
+            self.assertEqual(_top1_hits(HOLDOUT_GOLDEN), 12)
+            self.assertEqual(_v2_hit_count(), 24)
+            # v2 #29（D11「用户喜欢什么颜色」）仍命中：贪心取到长词「藏青」
+            row29 = _v2_rows()[29]
+            self.assertTrue(row29["hit"])
+            self.assertEqual(row29["retrieved"], "用户最喜欢的颜色是藏青色")
+
+    def test_variant_b_dropping_all_28_singles_loses_v1_2_3_and_v2_24(self):
+        self.assertEqual(_top1_hits(GOLDEN), 8)
+        self.assertEqual(_top1_hits(HOLDOUT_GOLDEN), 12)
+        self.assertEqual(_v2_hit_count(), 24)
+        all_singles = {(n, m) for n, ms in _single_char_members().items() for m in ms}
+        # 全词典 28 个单字 member：颜色15 / 生日4 / 宠物4 / 过敏3 / 称呼2
+        self.assertEqual(len(all_singles), 28)
+        with mock.patch.object(mr, "CONCEPT_LEXICON", _without_members(all_singles)):
+            # golden 不丢（8/8）：它的命中不依赖单字 member
+            self.assertEqual(_top1_hits(GOLDEN), 8)
+            # v1 丢 #2/#3：12 → 10
+            self.assertEqual(_top1_hits(HOLDOUT_GOLDEN), 10)
+            v1_flags = [
+                mr.rank(str(it["query"]), list(it["stored"]))[0][0] in set(it["relevant"])
+                for it in HOLDOUT_GOLDEN
+            ]
+            self.assertEqual([i for i, hit in enumerate(v1_flags) if not hit], [2, 3])
+            # v2 丢 #24：24 → 23，且 #24 由命中翻为未命中
+            self.assertEqual(_v2_hit_count(), 23)
+            self.assertFalse(_v2_rows()[24]["hit"])
 
 
 if __name__ == "__main__":
