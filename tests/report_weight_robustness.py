@@ -78,6 +78,8 @@ from __future__ import annotations
 
 import math
 import sys
+from collections import Counter
+from contextlib import ExitStack
 from pathlib import Path
 
 TESTS = Path(__file__).resolve().parent
@@ -145,21 +147,323 @@ def untouched_weights(name: str) -> tuple[str, ...]:
     return tuple(w for w in wg.WEIGHTS if w != name)
 
 
-def evaluate(factor_map: dict[str, float], base: tuple[str, float] | None = None) -> dict:
+def evaluate(factor_map: dict[str, float] | None = None,
+             base: tuple[str, float] | None = None) -> dict[str, dict]:
     """在给定基值覆盖 + 扰动因子下，量一次三集。
 
-    返回命中数、宏平均 P/R、命中对最小分差（含所属集与对号）、以及违约清单。
+    口径全部复用既有实现，本文件不另写第二份（第二份口径就是第二处会漂移的真相）：
+    命中数与宏平均 P/R 走 score_holdout_v2——就是 v2 盲测集「计分口径先于分数定下」
+    的那一套；命中对最小分差走 report_retrieval._min_margin(hits_only=True)——就是
+    sensitivity 模式报「实测最恶劣方向」用的那一个。
+
+    base 与 factor_map 的嵌套顺序是硬的：先 override 基值，再在内层按因子缩放，这
+    样格子里的因子作用于被覆盖后的基值，而不是作用于仓库里的现状值。反过来嵌套等
+    于扫了一个跟候选值无关的网格。
     """
-    raise NotImplementedError("扫描实现在后一格 commit；本格只落判据与框架")
+    with ExitStack() as stack:
+        if base is not None:
+            stack.enter_context(wg.override(mr, base[0], base[1]))
+        if factor_map:
+            stack.enter_context(wg.perturbed(mr, factor_map))
+        out: dict[str, dict] = {}
+        for name, corpus in CORPORA.items():
+            scored = score_holdout_v2(corpus)
+            margin, index, excluded = _min_margin(corpus, hits_only=True)
+            out[name] = {
+                "hits": sum(1 for row in scored["rows"] if row["hit"]),
+                "flags": [row["hit"] for row in scored["rows"]],
+                "n": len(corpus),
+                "precision": scored["precision"],
+                "recall": scored["recall"],
+                "margin": margin,
+                "index": index,
+                "excluded": excluded,
+            }
+        return out
+
+
+def worst(result: dict[str, dict]) -> tuple[float, str, int]:
+    """min over 三集 of 命中对最小分差 -> (分差, 所属集, 对号)。判据里的 worst()。"""
+    return min((cell["margin"], name, cell["index"]) for name, cell in result.items())
+
+
+def violations(result: dict[str, dict], limits: dict[str, int]) -> list[str]:
+    """三条硬约束逐格检查；返回空列表＝该格无违约。门槛值全部来自 hard_constraints()。"""
+    out = []
+    for tag, name in (("C1", "golden"), ("C2", "v1"), ("C3", "v2")):
+        hits, limit = result[name]["hits"], limits[name]
+        # C1/C2 是满分线（==），C3 是棘轮线（>=）：三集的门槛语义不同，不能一律用 >=
+        bad = hits < limit if name == "v2" else hits != limit
+        if bad:
+            need = ">=" if name == "v2" else "=="
+            out.append(f"{tag} {name}={hits} 违约(需 {need} {limit})")
+    return out
 
 
 def worst_over_grid(base: tuple[str, float]) -> dict:
-    """在给定基值下跑完整 88 格，取主目标（min over 配置 of worst(config)）。"""
-    raise NotImplementedError("扫描实现在后一格 commit；本格只落判据与框架")
+    """在给定基值下跑完整 88 格，取主目标（min over 配置 of worst(config)）。
+
+    违约格不参与主目标（判据里对 inf 陷阱的处置），但只要有一格违约，该候选值整体
+    淘汰——此时 objective 只是给复核者看的信息量，不构成任何采纳理由。
+    """
+    limits = hard_constraints()
+    baseline = evaluate(base=base)
+    records = []
+    for label, factor_map in wg.all_configs():
+        result = evaluate(factor_map, base)
+        margin, owner, index = worst(result)
+        changed = {name: (baseline[name]["hits"], result[name]["hits"])
+                   for name in CORPORA if result[name]["hits"] != baseline[name]["hits"]}
+        lost = {name: [i for i, (b, a) in enumerate(zip(baseline[name]["flags"], result[name]["flags"]))
+                       if b and not a]
+                for name in changed}
+        gained = {name: [i for i, (b, a) in enumerate(zip(baseline[name]["flags"], result[name]["flags"]))
+                         if a and not b]
+                  for name in changed}
+        records.append({
+            "label": label,
+            "margin": margin,
+            "owner": owner,
+            "index": index,
+            "violations": violations(result, limits),
+            "infinite": sorted(name for name, cell in result.items()
+                               if math.isinf(cell["margin"])),
+            "changed": changed,
+            "lost": lost,
+            "gained": gained,
+            "hits": {name: result[name]["hits"] for name in CORPORA},
+        })
+    pool = [record for record in records if not record["violations"]] or records
+    best = min(pool, key=lambda record: record["margin"])
+    loss_tally: dict[str, Counter] = {name: Counter() for name in CORPORA}
+    gain_tally: dict[str, Counter] = {name: Counter() for name in CORPORA}
+    for record in records:
+        for name, indices in record["lost"].items():
+            loss_tally[name].update(indices)
+        for name, indices in record["gained"].items():
+            gain_tally[name].update(indices)
+    return {
+        "base": base,
+        "baseline": baseline,
+        "records": records,
+        "objective": best["margin"],
+        "objective_where": (best["label"], best["owner"], best["index"]),
+        "violating": [record for record in records if record["violations"]],
+        "flipped": [record for record in records if record["changed"]],
+        "infinite": [record for record in records if record["infinite"]],
+        "loss_tally": loss_tally,
+        "gain_tally": gain_tally,
+    }
+
+
+def _tally_text(tally: Counter, total: int) -> str:
+    """把「哪几对被翻掉、各被翻掉几次」压成一行。次数分母是 88 格。"""
+    if not tally:
+        return "无"
+    return " ".join(f"#{i}(x{c}/{total})" for i, c in sorted(tally.items()))
+
+
+def print_candidate(name: str, value: float, summary: dict, live: float) -> None:
+    baseline = summary["baseline"]
+    total = len(summary["records"])
+    tag = "  <- 现状" if value == live else ""
+    print("-" * 132)
+    print(f"候选 {name}={value:g}{tag}")
+    print("-" * 132)
+    cells = []
+    for key in CORPORA:
+        cell = baseline[key]
+        cells.append(f"{key} {cell['hits']}/{cell['n']} P={cell['precision']:.4f} "
+                     f"R={cell['recall']:.4f} 命中对最小分差={cell['margin']:.4f}(#{cell['index']})")
+    print("  基线（未扰动）  " + " | ".join(cells))
+    label, owner, index = summary["objective_where"]
+    print(f"  88 格主目标（最恶劣命中对分差）= {summary['objective']:.4f}  在 {label} / {owner} / #{index}")
+    print(f"  违约格 {len(summary['violating'])}/{total}"
+          f"   造成命中变化的格 {len(summary['flipped'])}/{total}"
+          f"   出现 +inf 的格 {len(summary['infinite'])}/{total}")
+    for key in CORPORA:
+        lost = _tally_text(summary["loss_tally"][key], total)
+        gained = _tally_text(summary["gain_tally"][key], total)
+        if lost != "无" or gained != "无":
+            print(f"    {key:<7} 掉过的对 {lost}   捡到的对 {gained}")
+    if summary["violating"]:
+        reasons = Counter(reason
+                          for record in summary["violating"]
+                          for reason in record["violations"])
+        print("    违约原因分布：" + "；".join(f"{reason} x{c}" for reason, c in reasons.most_common()))
+        print("    违约格清单（前 12）：" + ", ".join(
+            f"{record['label']}[{'; '.join(record['violations'])}]"
+            for record in summary["violating"][:12])
+            + ("..." if len(summary["violating"]) > 12 else ""))
+    ranked = sorted((record for record in summary["records"] if not record["violations"]),
+                    key=lambda record: record["margin"])[:5]
+    print("    最恶劣前五格（仅无违约格）：" + ", ".join(
+        f"{record['label']}={record['margin']:.4f}({record['owner']} #{record['index']})"
+        for record in ranked))
+
+
+def decide(name: str, rows: list[tuple[float, dict]], live: float) -> None:
+    """机械地把判据套到扫描结果上。这一段的每一行都能由上面的表格逐字核对。"""
+    limits = hard_constraints()
+    print("=" * 132)
+    print("决策（判据机械套用；「存活」= 三条硬约束在全部 88 格上逐格通过）")
+    print("=" * 132)
+    print(f"{'基值':<12}{'基线 v2 命中':>12}{'主目标':>10}{'相对现状':>12}"
+          f"{'违约格':>8}{'命中变化格':>12}   判定")
+    print("-" * 132)
+    status = next(summary for value, summary in rows if value == live)
+    for value, summary in rows:
+        ratio = (summary["objective"] / status["objective"]
+                 if status["objective"] else float("inf"))
+        alive = not summary["violating"]
+        verdict = "存活" if alive else f"淘汰（{len(summary['violating'])} 格违约）"
+        if value == live:
+            verdict += " <- 现状"
+        print(f"{value:<12.4g}{summary['baseline']['v2']['hits']:>12}"
+              f"{summary['objective']:>10.4f}{ratio:>11.1f}x"
+              f"{len(summary['violating']):>8}{len(summary['flipped']):>12}   {verdict}")
+    print("-" * 132)
+    survivors = [(value, summary) for value, summary in rows if not summary["violating"]]
+    print(f"  硬约束门槛（逐格检查，不只查基线）：C1 golden=={limits['golden']}、"
+          f"C2 v1=={limits['v1']}、C3 v2>={limits['v2']}")
+    print(f"  存活候选：{[f'{value:g}' for value, _ in survivors] or '无'}")
+    if survivors:
+        best_value, best = max(survivors, key=item_objective)
+        print(f"  存活候选中主目标最大者：{best_value:g}（{best['objective']:.4f}）；"
+              f"现状 {live:g}（{status['objective']:.4f}）")
+    # 诱惑清单：命中涨了、分差没改善。判据要求这次诱惑与这次拒绝都如实报出来。
+    print()
+    print("  诱惑清单（命中数或 P/R 变好、但主目标没有改善的候选）——判据禁止拿它们当采纳理由：")
+    temptations = []
+    for value, summary in rows:
+        if value == live:
+            continue
+        better_hits = any(summary["baseline"][key]["hits"] > status["baseline"][key]["hits"]
+                          for key in CORPORA)
+        fewer_flips = len(summary["flipped"]) < len(status["flipped"])
+        better_pr = (summary["baseline"]["v2"]["precision"] > status["baseline"]["v2"]["precision"]
+                     or summary["baseline"]["v2"]["recall"] > status["baseline"]["v2"]["recall"])
+        improved = summary["objective"] > status["objective"]
+        if (better_hits or fewer_flips or better_pr) and not improved:
+            temptations.append((value, better_hits, fewer_flips, better_pr, summary))
+    if not temptations:
+        print("    无（没有任何候选在约束侧变好而主目标不变好）")
+    for value, better_hits, fewer_flips, better_pr, summary in temptations:
+        why = [label for flag, label in ((better_hits, "三集命中数有涨"),
+                                        (fewer_flips, "造成命中变化的格数更少"),
+                                        (better_pr, "v2 宏平均 P/R 更好看")) if flag]
+        print(f"    {name}={value:g}：{'、'.join(why)}，但主目标 "
+              f"{summary['objective']:.4f} <= 现状 {status['objective']:.4f}"
+              f"，且违约 {len(summary['violating'])} 格 —— 按判据拒绝")
+
+    # 主筛子对全体判负时（含现状），筛子本身就失去了区分力，必须自报
+    total = len(status["records"])
+    print()
+    if status["violating"]:
+        shallow = depth(status)
+        print(f"  自报判据缺陷之一：现状值 {live:g} 自己在逐格硬约束下也不存活"
+              f"（{len(status['violating'])}/{total} 格违约，最浅缺口 {shallow}）。")
+        if not survivors:
+            print("    本轮所有候选值一律判负，「存活」这个筛子失去区分力：它只能当比较量用"
+                  "（比违约格数、违约深度与波及面），")
+            print("    不能当通过/淘汰用。也就是说，逐格零回归在本轮扫描到的取值范围内不可达"
+                  "——注意这个结论的范围仅限本轮候选表，")
+            print("    不能推广成「对本架构不可达」：候选表是预登记的，边界外的取值本轮没扫。")
+        else:
+            alive = ", ".join(f"{value:g}" for value, _s in survivors)
+            print(f"    但存活候选（{alive}）说明逐格零回归**是可达的**，只是现状值不在那个"
+                  "区域里；此时筛子仍有区分力，")
+            print("    判据照常适用，缺陷只剩下面这一条。")
+        print("    本轮不据此改判据——改在看见结果之后，就是照着结果倒推。若下一轮要"
+              "据此调权重，")
+        print("    必须先重新登记判据（把违约格数与深度提为主目标或次级目标），再跑扫描。")
+        print()
+        print("  次级比较（信息量，不构成采纳理由）：")
+        print(f"    {'基值':<10}{'违约格':>8}{'最浅缺口':>10}{'波及对数':>10}{'主目标':>10}")
+        for value, summary in rows:
+            print(f"    {value:<10.4g}{len(summary['violating']):>8}{depth(summary):>10}"
+                  f"{distinct_lost_pairs(summary):>10}{summary['objective']:>10.4f}")
+
+    print()
+    objectives = [summary["objective"] for _value, summary in rows]
+    owners = Counter(f"{summary['objective_where'][1]} #{summary['objective_where'][2]}"
+                     for _value, summary in rows)
+    print("  自报判据缺陷之二：主目标对约束侧的改善不敏感。本轮 "
+          f"{len(rows)} 个候选值的主目标全落在 {min(objectives):.4f}-{max(objectives):.4f}")
+    print(f"    这个窄带里（最恶劣格的归属分布：{dict(owners.most_common())}），"
+          f"而同期违约格数从 {min(len(s['violating']) for _v, s in rows)} 变到 "
+          f"{max(len(s['violating']) for _v, s in rows)}。")
+    print("    原因是主目标量的是「一个已判对的结论离被推翻有多远」，它量不到「有多少格根本"
+          "判错了」；后者落在约束侧。")
+    print("    所以一个能把命中翻转清零的候选值，在主目标上可以纹丝不动。两个口径都要看，"
+          "只看一个会得出反直觉的结论。")
+    print("    这一条同样不在本轮改：判据是先登记的那一份，改它就是照着结果倒推。")
+    print()
+    print("  结论（判据机械推出，不是手写）：")
+    if not survivors:
+        print(f"    没有任何候选值在全部 {total} 格上通过三条硬约束（现状值自己也没通过），")
+        print(f"    按判据「若不存在 -> 保持现状值不动」：{name} 保持 {live:g}，负面结果写进文档。")
+    else:
+        best_value, best = max(survivors, key=item_objective)
+        if best["objective"] <= status["objective"]:
+            print(f"    唯一/最优存活候选 {best_value:g} 的主目标 {best['objective']:.4f} "
+                  f"<= 现状 {status['objective']:.4f}，未改善，")
+            print(f"    按判据「显著改善才采纳」：{name} 保持 {live:g}。"
+                  f"该存活候选在约束侧的优势已列入诱惑清单并拒绝。")
+        else:
+            print(f"    存活候选 {best_value:g} 主目标 {best['objective']:.4f} > "
+                  f"现状 {status['objective']:.4f}（{best['objective'] / status['objective']:.1f}x），")
+            print("    判据只写了「显著改善」而没给倍数门槛——这是判据的第二个缺陷。"
+                  "本轮不临时补门槛，")
+            print("    如实把倍数报出来，由复核者判断；不在看见结果之后才定义什么叫显著。")
+
+
+def item_objective(item: tuple[float, dict]) -> float:
+    return item[1]["objective"]
+
+
+def depth(summary: dict) -> int:
+    """违约深度 = 违约格里「三集命中数缺口之和」的最小值；零违约返回 0。
+
+    「违约格数」只说坏了几格，不说坏得多深。同样是 9 格违约，掉到 23 与掉到 20 是
+    两件差很远的事。缺口 = 门槛值 - 实测命中数，逐集取正部再求和，越小越浅。
+    """
+    limits = hard_constraints()
+    gaps = [sum(max(0, limits[name] - record["hits"][name]) for name in CORPORA)
+            for record in summary["violating"]]
+    return min(gaps) if gaps else 0
+
+
+def distinct_lost_pairs(summary: dict) -> int:
+    """掉过的对（跨三集去重计数）：违约格数相同时，波及面越窄越好。"""
+    return sum(len(tally) for tally in summary["loss_tally"].values())
 
 
 def sweep(which: str) -> None:
-    raise NotImplementedError("扫描实现在后一格 commit；本格只落判据与框架")
+    name, values = CANDIDATES[which]
+    problems = check_candidates_are_anchored()
+    if problems:
+        raise SystemExit("锚定校验未过，扫描没有参照点，拒跑：" + "; ".join(problems))
+    live = getattr(mr, name)
+    kept = ", ".join(f"{w}={getattr(mr, w):g}" for w in untouched_weights(name))
+    limits = hard_constraints()
+    total = wg.grid_sizes()["total"]
+    print("=" * 132)
+    print(f"N10-2 扫描：{name} ∈ {[f'{v:g}' for v in values]}（一次只动这一个变量，"
+          f"本轮不动 {kept}）")
+    print("=" * 132)
+    print("判据（先写后跑，全文见 criteria 模式）：主目标 = min over 88 格 of min over 三集 of")
+    print("命中对最小分差；硬约束 C1/C2/C3 在全部 88 格上逐格检查，不只在基线权重下检查。")
+    print(f"门槛值运行时现读：C1 golden=={limits['golden']}、C2 v1=={limits['v1']}、"
+          f"C3 v2>={limits['v2']}；网格 {total} 格。")
+    print()
+    rows: list[tuple[float, dict]] = []
+    for value in values:
+        summary = worst_over_grid((name, value))
+        rows.append((value, summary))
+        print_candidate(name, value, summary, live)
+    print()
+    decide(name, rows, live)
 
 
 def print_criteria() -> None:
