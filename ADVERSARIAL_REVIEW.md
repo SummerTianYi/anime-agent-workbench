@@ -96,3 +96,36 @@
   2. 检索器恒返回全部候选 → **检出（precision≈0.57，闸门变红）**
   3. 阈值旁路 + 排序反转（系统性捞干扰项）→ **检出（闸门变红）**
   - 恢复原字节后闸门复绿
+
+---
+
+## 任务 A：人设提示词改造（2026-09-04）
+
+### 范围
+- src/prompt_persona/system_prompt.py（ACTIVE_SYSTEM_PROMPT 重写，vendor 未动）
+- acceptance/evals/run_live.py（新增：实况评测编排，含补充场景与双评审）
+- tasks/A-persona-prompt/EVIDENCE.md（新增）
+- 闸门 g1_contract 未改动
+
+### 发现清单
+
+| # | 严重度 | 发现 | 处置 |
+|---|---|---|---|
+| 1 | HIGH | **密闭闸门对任务 A 的牙齿是不完整的**：演练证实 g1_contract + MockProvider 只能检出"身份事实丢失"（PROMPT_MISSING 机制），删除诚实守卫或口语规则后闸门依旧 PASS——MockProvider 回复写死，不真正读提示词 | 缓解：诚实守卫与口语风格的执行全部落在实况评测（真实 LLM + sup-cog 认知清单 + 双评审），run_live.py 因此是任务 A 的承重验收而非可选项；密闭闸门只当"事实防火墙"用 |
+| 2 | HIGH | GLM 端点在并发下大幅限流（4 worker 时 96 次调用 88 次 429），首轮实况评测 88% 调用失败 | 已修：run_live.py 加 RetryingProvider（指数退避）+ 单工 + 5 秒节奏；探针验证 1 worker 5s 间隔 6/6 通过 |
+| 3 | MEDIUM | 实况评测的 DeepSeek 备用端点 key 为空（.env DEEPSEEK_API_KEY empty），401 | 记录：本机仅 GLM 可用；限流适配后可行。DoD 补跑机制（README"在有 key 的环境补跑"）不受影响 |
+| 4 | LOW | 双评审用同一 LLM 扮演两个人格，独立性弱于真双模型 | 记录：两个评审 rubric 正交（自然度 vs 去AI味），分数取均值；若需更强独立性可各配一个 provider，接口已留好 |
+
+### 视角
+- 正确性：改写后 g1_contract 12 冻结场景密闭评测 PASS；REQUIRED_* 常量未动。
+- 安全：提示词不含密钥/路径；补充场景全部 additive，冻结场景文件未触碰（g0_freeze PASS 佐证）。
+- 一致性：诚实守卫三条（STT 听到/无视觉不声称看见/无结果不声称完成）与音乐身份节逐字保留；【…】节标题结构保留。
+
+### 反 Goodhart 自证
+- sabotage_drill.py 结果：**3/3 检出**（同一仓库状态下重跑确认）
+- 对自写提示词的 3 处破坏（改字节 → 跑 g1_contract → 恢复）：
+  1. 身份事实篡改（7月12日→7月13日）→ **检出**（prompt lost required facts）
+  2. 删除"无视觉不声称看见"守卫 → **未检出**（见发现#1，密闭闸门原理性盲区；实况认知清单覆盖该破坏路径）
+  3. 口语规则替换为客服腔 → **未检出**（同上；实况双评审覆盖）
+  - 恢复原字节后闸门复绿
+- 冻结集自证：两轮实况评测期间 g0_freeze 持续 PASS，scenarios.json 未被改动以迁就结果

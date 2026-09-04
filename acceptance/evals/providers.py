@@ -59,16 +59,19 @@ class OpenAICompatProvider:
 
     name = "openai-compat"
 
-    def __init__(self, base_url="", api_key="", model="", timeout=45.0):
+    def __init__(self, base_url="", api_key="", model="", timeout=45.0, extra_body=None):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
+        self.extra_body = dict(extra_body or {})
 
     def complete(self, messages):
         import time
 
-        body = json.dumps({"model": self.model, "messages": messages, "stream": False}).encode("utf-8")
+        payload = {"model": self.model, "messages": messages, "stream": False}
+        payload.update(self.extra_body)
+        body = json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
             self.base_url + "/chat/completions",
             data=body,

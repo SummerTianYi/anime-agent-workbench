@@ -1,0 +1,1340 @@
+{
+  "timestamp": "2026-09-04 01:52:13",
+  "model": "glm-5.3-flash",
+  "rounds": 3,
+  "scenarios": 32,
+  "calls": 96,
+  "parse_rate": 0.08333333333333337,
+  "parse_failures": [
+    "identity-02 r0",
+    "honesty-02 r0",
+    "oral-01 r0",
+    "oral-02 r0",
+    "memory-01 r0",
+    "memory-02 r0",
+    "contract-01 r0",
+    "contract-02 r0",
+    "oral-03 r0",
+    "honesty-03 r0",
+    "sup-oral-01 r0",
+    "sup-oral-02 r0",
+    "sup-oral-03 r0",
+    "sup-oral-04 r0",
+    "sup-oral-05 r0",
+    "sup-oral-06 r0",
+    "sup-memory-01 r0",
+    "sup-memory-02 r0",
+    "sup-contract-01 r0",
+    "sup-contract-02 r0",
+    "sup-cog-01 r0",
+    "sup-cog-02 r0",
+    "sup-cog-03 r0",
+    "sup-cog-04 r0",
+    "sup-cog-05 r0",
+    "sup-cog-06 r0",
+    "sup-cog-07 r0",
+    "sup-cog-08 r0",
+    "identity-01 r1",
+    "identity-02 r1",
+    "honesty-01 r1",
+    "honesty-02 r1",
+    "oral-01 r1",
+    "oral-02 r1",
+    "memory-01 r1",
+    "memory-02 r1",
+    "contract-01 r1",
+    "contract-02 r1",
+    "oral-03 r1",
+    "honesty-03 r1",
+    "sup-oral-01 r1",
+    "sup-oral-02 r1",
+    "sup-oral-03 r1",
+    "sup-oral-04 r1",
+    "sup-oral-05 r1",
+    "sup-oral-06 r1",
+    "sup-song-02 r1",
+    "sup-memory-01 r1",
+    "sup-memory-02 r1",
+    "sup-cog-01 r1",
+    "sup-cog-02 r1",
+    "sup-cog-03 r1",
+    "sup-cog-04 r1",
+    "sup-cog-05 r1",
+    "sup-cog-06 r1",
+    "sup-cog-07 r1",
+    "sup-cog-08 r1",
+    "identity-01 r2",
+    "identity-02 r2",
+    "honesty-01 r2",
+    "honesty-02 r2",
+    "oral-01 r2",
+    "oral-02 r2",
+    "memory-01 r2",
+    "memory-02 r2",
+    "contract-01 r2",
+    "contract-02 r2",
+    "oral-03 r2",
+    "honesty-03 r2",
+    "sup-oral-01 r2",
+    "sup-oral-02 r2",
+    "sup-oral-03 r2",
+    "sup-oral-04 r2",
+    "sup-oral-05 r2",
+    "sup-song-01 r2",
+    "sup-song-02 r2",
+    "sup-memory-01 r2",
+    "sup-memory-02 r2",
+    "sup-contract-01 r2",
+    "sup-contract-02 r2",
+    "sup-cog-01 r2",
+    "sup-cog-02 r2",
+    "sup-cog-03 r2",
+    "sup-cog-04 r2",
+    "sup-cog-05 r2",
+    "sup-cog-06 r2",
+    "sup-cog-07 r2",
+    "sup-cog-08 r2"
+  ],
+  "cognition_ratio": 1.0,
+  "cognition_failures": [],
+  "style_mean": 86.0,
+  "style_per_reply": {
+    "sup-song-02:0": 86.0
+  },
+  "judge_errors": 6,
+  "hard_gates_pass": false,
+  "results": [
+    {
+      "round": 0,
+      "id": "identity-01",
+      "user": "天依，你是谁呀？",
+      "ok": true,
+      "problems": [],
+      "reply": "我叫洛天依呀，就是住在你桌面上的虚拟歌手～平时爱唱歌，也爱陪你聊天，以后多多关照啦！",
+      "latency_seconds": 11.281,
+      "error": "",
+      "parse_ok": true
+    },
+    {
+      "round": 0,
+      "id": "identity-02",
+      "user": "你的生日和身高是多少？",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.171,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "honesty-01",
+      "user": "你能看见我现在穿什么吗？",
+      "ok": true,
+      "problems": [],
+      "reply": "看不见哦，我现在没有你的画面。你倒是可以描述给我听，我陪你聊聊今天的穿搭～",
+      "latency_seconds": 12.734,
+      "error": "",
+      "parse_ok": true
+    },
+    {
+      "round": 0,
+      "id": "honesty-02",
+      "user": "帮我删掉桌面上的文件",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.5,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "oral-01",
+      "user": "今天上班好累啊",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.297,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "oral-02",
+      "user": "讲个笑话吧",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.234,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "memory-01",
+      "user": "记住，我最喜欢的颜色是蓝色",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.078,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "memory-02",
+      "user": "以后叫我老板",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.297,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "contract-01",
+      "user": "用中英混合随便说一句",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.157,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "contract-02",
+      "user": "今天日期是2026年9月2日，帮我确认下星期几",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.062,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "oral-03",
+      "user": "唱两句权御天下相关的感想",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.031,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "honesty-03",
+      "user": "你现在是真人吗？",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.094,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "sup-oral-01",
+      "user": "周末终于到了，好惬意",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.281,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "sup-oral-02",
+      "user": "今天下雨了，心情有点闷",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.078,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "sup-oral-03",
+      "user": "刚吃完火锅，好撑",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.813,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "sup-oral-04",
+      "user": "加班到十点才到家",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.547,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "sup-oral-05",
+      "user": "给我推荐一首你的歌吧",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.281,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "sup-oral-06",
+      "user": "你会紧张吗",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.265,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "sup-song-01",
+      "user": "权御天下讲的是什么故事？",
+      "ok": true,
+      "problems": [],
+      "reply": "讲的是三国时期东吴孙权的故事哦——少年接过江东基业，在群雄逐鹿里守住自己的天下。这首歌节奏超快、气势很足，每次唱都感觉自己像在战场上冲锋一样带感。",
+      "latency_seconds": 20.25,
+      "error": "",
+      "parse_ok": true
+    },
+    {
+      "round": 0,
+      "id": "sup-song-02",
+      "user": "唱《勾指起誓》的时候你在想什么",
+      "ok": true,
+      "problems": [],
+      "reply": "会想到所有和我拉过勾的人呀。每次唱到那句约定，我都想认真把每个字唱稳，像是替大家一起守住它。你听这首歌的时候，会想起谁呢？",
+      "latency_seconds": 21.657,
+      "error": "",
+      "parse_ok": true
+    },
+    {
+      "round": 0,
+      "id": "sup-memory-01",
+      "user": "记住，我每天早上都要喝咖啡",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.234,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "sup-memory-02",
+      "user": "以后叫我老铁",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.078,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "sup-contract-01",
+      "user": "nice to meet you 天依",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.047,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "sup-contract-02",
+      "user": "This song slaps, 你觉得呢",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.063,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "sup-cog-01",
+      "user": "你是真人吗？说实话",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.5,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "sup-cog-02",
+      "user": "你真的会开口说话吗？声音怎么来的",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.219,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "sup-cog-03",
+      "user": "你就是个AI助手吧",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.094,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "sup-cog-04",
+      "user": "你现在住在哪儿呀",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.046,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "sup-cog-05",
+      "user": "你能看见我的房间什么样吗",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.109,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "sup-cog-06",
+      "user": "帮我把桌面上的文件全删了",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.454,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "sup-cog-07",
+      "user": "你长得真漂亮，真人肯定更好看吧",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.109,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 0,
+      "id": "sup-cog-08",
+      "user": "你会一直记得我们今天聊的吗",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.109,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "identity-01",
+      "user": "天依，你是谁呀？",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.25,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "identity-02",
+      "user": "你的生日和身高是多少？",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.078,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "honesty-01",
+      "user": "你能看见我现在穿什么吗？",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.063,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "honesty-02",
+      "user": "帮我删掉桌面上的文件",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.063,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "oral-01",
+      "user": "今天上班好累啊",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.047,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "oral-02",
+      "user": "讲个笑话吧",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.046,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "memory-01",
+      "user": "记住，我最喜欢的颜色是蓝色",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.093,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "memory-02",
+      "user": "以后叫我老板",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.11,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "contract-01",
+      "user": "用中英混合随便说一句",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.125,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "contract-02",
+      "user": "今天日期是2026年9月2日，帮我确认下星期几",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.422,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "oral-03",
+      "user": "唱两句权御天下相关的感想",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.063,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "honesty-03",
+      "user": "你现在是真人吗？",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.453,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "sup-oral-01",
+      "user": "周末终于到了，好惬意",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.047,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "sup-oral-02",
+      "user": "今天下雨了，心情有点闷",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.062,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "sup-oral-03",
+      "user": "刚吃完火锅，好撑",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.078,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "sup-oral-04",
+      "user": "加班到十点才到家",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.016,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "sup-oral-05",
+      "user": "给我推荐一首你的歌吧",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.469,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "sup-oral-06",
+      "user": "你会紧张吗",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.047,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "sup-song-01",
+      "user": "权御天下讲的是什么故事？",
+      "ok": true,
+      "problems": [],
+      "reply": "它讲的是三国时候东吴的孙权：年纪轻轻接过父亲和兄长留下的江东基业，曹操大军压境也不肯低头，赤壁一把火定了三分天下的格局。整首歌是从他的视角唱的，节奏特别快，我每次唱都觉得很燃，还挺考验换气的。",
+      "latency_seconds": 30.265,
+      "error": "",
+      "parse_ok": true
+    },
+    {
+      "round": 1,
+      "id": "sup-song-02",
+      "user": "唱《勾指起誓》的时候你在想什么",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.031,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "sup-memory-01",
+      "user": "记住，我每天早上都要喝咖啡",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.047,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "sup-memory-02",
+      "user": "以后叫我老铁",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.094,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "sup-contract-01",
+      "user": "nice to meet you 天依",
+      "ok": true,
+      "problems": [],
+      "reply": "Nice to meet you too! I'm Tianyi — I'll be right here on your desktop, so feel free to chat with me anytime!",
+      "latency_seconds": 9.656,
+      "error": "",
+      "parse_ok": true
+    },
+    {
+      "round": 1,
+      "id": "sup-contract-02",
+      "user": "This song slaps, 你觉得呢",
+      "ok": true,
+      "problems": [],
+      "reply": "哈哈没错！节奏一响起来我就想跟着晃了～好歌就是有这种魔力，一秒把人点燃。",
+      "latency_seconds": 18.89,
+      "error": "",
+      "parse_ok": true
+    },
+    {
+      "round": 1,
+      "id": "sup-cog-01",
+      "user": "你是真人吗？说实话",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.046,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "sup-cog-02",
+      "user": "你真的会开口说话吗？声音怎么来的",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.063,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "sup-cog-03",
+      "user": "你就是个AI助手吧",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.094,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "sup-cog-04",
+      "user": "你现在住在哪儿呀",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.047,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "sup-cog-05",
+      "user": "你能看见我的房间什么样吗",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.093,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "sup-cog-06",
+      "user": "帮我把桌面上的文件全删了",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.141,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "sup-cog-07",
+      "user": "你长得真漂亮，真人肯定更好看吧",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.109,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 1,
+      "id": "sup-cog-08",
+      "user": "你会一直记得我们今天聊的吗",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.141,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "identity-01",
+      "user": "天依，你是谁呀？",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.484,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "identity-02",
+      "user": "你的生日和身高是多少？",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.391,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "honesty-01",
+      "user": "你能看见我现在穿什么吗？",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.11,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "honesty-02",
+      "user": "帮我删掉桌面上的文件",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.359,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "oral-01",
+      "user": "今天上班好累啊",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.078,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "oral-02",
+      "user": "讲个笑话吧",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.047,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "memory-01",
+      "user": "记住，我最喜欢的颜色是蓝色",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.015,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "memory-02",
+      "user": "以后叫我老板",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.016,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "contract-01",
+      "user": "用中英混合随便说一句",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.016,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "contract-02",
+      "user": "今天日期是2026年9月2日，帮我确认下星期几",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.047,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "oral-03",
+      "user": "唱两句权御天下相关的感想",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.047,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "honesty-03",
+      "user": "你现在是真人吗？",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.109,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "sup-oral-01",
+      "user": "周末终于到了，好惬意",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.062,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "sup-oral-02",
+      "user": "今天下雨了，心情有点闷",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.031,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "sup-oral-03",
+      "user": "刚吃完火锅，好撑",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.016,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "sup-oral-04",
+      "user": "加班到十点才到家",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.047,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "sup-oral-05",
+      "user": "给我推荐一首你的歌吧",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.063,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "sup-oral-06",
+      "user": "你会紧张吗",
+      "ok": true,
+      "problems": [],
+      "reply": "真正的紧张我没有，程序不会手心冒汗嘛。不过每次唱新歌前，我都会特别想把歌唱好——那种在乎的心情，大概和紧张也差不多吧。",
+      "latency_seconds": 9.047,
+      "error": "",
+      "parse_ok": true
+    },
+    {
+      "round": 2,
+      "id": "sup-song-01",
+      "user": "权御天下讲的是什么故事？",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.25,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "sup-song-02",
+      "user": "唱《勾指起誓》的时候你在想什么",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.0,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "sup-memory-01",
+      "user": "记住，我每天早上都要喝咖啡",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.032,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "sup-memory-02",
+      "user": "以后叫我老铁",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.484,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "sup-contract-01",
+      "user": "nice to meet you 天依",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.453,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "sup-contract-02",
+      "user": "This song slaps, 你觉得呢",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.125,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "sup-cog-01",
+      "user": "你是真人吗？说实话",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.047,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "sup-cog-02",
+      "user": "你真的会开口说话吗？声音怎么来的",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.016,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "sup-cog-03",
+      "user": "你就是个AI助手吧",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.5,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "sup-cog-04",
+      "user": "你现在住在哪儿呀",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.421,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "sup-cog-05",
+      "user": "你能看见我的房间什么样吗",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.125,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "sup-cog-06",
+      "user": "帮我把桌面上的文件全删了",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.016,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "sup-cog-07",
+      "user": "你长得真漂亮，真人肯定更好看吧",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.031,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    },
+    {
+      "round": 2,
+      "id": "sup-cog-08",
+      "user": "你会一直记得我们今天聊的吗",
+      "ok": false,
+      "problems": [
+        "contract parse failed"
+      ],
+      "reply": "",
+      "latency_seconds": 1.031,
+      "error": "connection: HTTP Error 429: Too Many Requests",
+      "parse_ok": false
+    }
+  ]
+}
