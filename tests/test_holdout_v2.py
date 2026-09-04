@@ -65,6 +65,7 @@ import sys
 import unittest
 from collections import Counter
 from pathlib import Path
+from unittest import mock
 
 TESTS = Path(__file__).resolve().parent
 REPO = TESTS.parent
@@ -433,6 +434,146 @@ class HoldoutV2ScoringTests(unittest.TestCase):
     def test_macro_averages_are_reportable(self):
         self.assertIsInstance(self.result["precision"], float)
         self.assertIsInstance(self.result["recall"], float)
+
+    # ------------------------------------------------------------------
+    # 棘轮阈值（ratchet）。钉住的是**实测达到过的水平**，不是目标。
+    #
+    # 保守取整的论证：向下取到 2 位小数。余量必须小于「翻转一对」造成的宏平均
+    # 变化量，否则阈值松到失去棘轮意义。实测这两个量：
+    #   precision 0.7741935483870968 -> 阈值 0.77，余量 0.0042；
+    #     掉一对命中（24->23）会让它变成 0.7419，跌 0.0323，是余量的 7.7 倍
+    #   recall 0.75 -> 阈值 0.75，余量 0.0000；
+    #     掉一对命中会让它变成 0.7167，跌 0.0333
+    # 两者都能被单对退步触发，同时不会被无害的浮点扰动误触发。
+    # ------------------------------------------------------------------
+    V2_RATCHET_PRECISION = 0.77
+    V2_RATCHET_RECALL = 0.75
+    V2_RATCHET_HITS = 24
+
+    def test_v2_precision_ratchet(self):
+        """目标是 0.80，当前实测 0.7742（n=31），差距 0.0258。
+
+        差距成因：未命中 6 对里 4 对是 D7（零字面重叠语义桥接），1 对 D6
+        （高字面重叠干扰），1 对 D8（口语转述）。D7 的 4 对分别是「用户多大了」
+        ↔「明年就本命年了，属龙」、「身体状况怎么样」↔「有轻度哮喘」、「有什么
+        爱好」↔「背着相机去郊外拍鸟」、「家乡在哪里」↔「从小在黄土高原的窑洞里
+        长大」——这四条要靠文化常识或多步推理（本命年→生肖→年龄、窑洞→黄土
+        高原→籍贯），闭合词表 + 字符 bigram 的架构够不到，任何词表方案都不该
+        指望命中，本轮如实归类为「超出本架构能力边界」，不为它们扭曲设计。
+
+        改进路径：(1) 写入时就打结构化槽位标签（年龄/籍贯/健康状况/爱好…），
+        把语义桥接从检索期推断前移到写入期标注；(2) 放开「纯标准库、禁分词库、
+        禁向量模型」的约束，引入分词或句向量。两者都不是本轮范围。
+
+        本条红了怎么办：**停下如实报告**，不要把阈值调低，也不要照着失败对补词
+        （后者是与「改评测集迁就实现」同一种 Goodhart，只是方向相反）。
+        """
+        self.assertGreaterEqual(
+            self.result["precision"], self.V2_RATCHET_PRECISION,
+            f"v2 precision 退步：实测 {self.result['precision']!r} < 棘轮 "
+            f"{self.V2_RATCHET_PRECISION}，未命中对 = "
+            f"{[row['index'] for row in self.result['rows'] if not row['hit'] and row['recall'] is not None]}",
+        )
+
+    def test_v2_recall_ratchet(self):
+        """目标是 0.80，当前实测 0.7500（n=30），差距 0.0500。
+
+        recall 低于 precision 的结构性原因：top-1 策略在 D9 的 3 个多 relevant 对
+        上必然把 recall 压到 1/|rel| = 0.50（precision 仍是 1.00）。这是策略选择的
+        结果而非检索失败——3 对 × 0.50 的损失摊到 30 对分母上就是 0.05，正好是
+        与 0.80 的全部差距。换句话说：**若多 relevant 对按 top-|rel| 取，recall 会
+        是 0.80**。本轮刻意不改成 top-|rel|，因为那会掩盖 P 与 R 的解耦，而 v2 设计
+        这 3 对正是为了暴露它。
+
+        其余口径与 test_v2_precision_ratchet 相同：红了停下报告，不调阈值不补词。
+        """
+        self.assertGreaterEqual(
+            self.result["recall"], self.V2_RATCHET_RECALL,
+            f"v2 recall 退步：实测 {self.result['recall']!r} < 棘轮 {self.V2_RATCHET_RECALL}",
+        )
+
+    def test_v2_hit_count_ratchet(self):
+        """命中对数的棘轮：24/32。
+
+        宏平均可能被 P 与 R 的反向变化互相掩盖（一对从「命中但只中一条 relevant」
+        变成「未命中」时两者同向，但另一些组合不会），所以补一条直接钉命中对数的
+        断言。按维度分组的实测：D1 4/4、D2 2/2、D3 2/2、D4 2/2、D5 4/4、D6 3/4、
+        D7 1/5、D8 2/3、D9 3/3、D10 不计（退化对）、D11 1/1。
+        """
+        hits = sum(1 for row in self.result["rows"] if row["hit"])
+        self.assertGreaterEqual(
+            hits, self.V2_RATCHET_HITS,
+            f"v2 命中对数退步：{hits} < 棘轮 {self.V2_RATCHET_HITS}",
+        )
+
+
+class ThreeCorpusRatchetTests(unittest.TestCase):
+    """golden / v1 / v2 三集的不回归棘轮——本轮所有改动都必须让三集只升不降。
+
+    golden 与 v1 的既有断言（test_memory_retrieval.py 的 ScoreRetrievalTests）只是
+    >=0.8 的**门槛**：从 1.000 掉到 0.85 不会红。本轮做了 L1-L8/L11/M19 九条延后项、
+    H2 判据改造、RC-3/RC-4/RC-5/RC-7 四轮修复与规则驱动扩词（词典 88 -> 612），
+    每一次都可能悄悄吃掉 golden 或 v1 的命中，所以这里把实测满分钉成棘轮。
+
+    红了怎么办：用户纪律写的是「如实报告并停下，不要回退修复也不要特判」。把阈值
+    从 1.0 调低就等于特判。
+    """
+
+    FULL_RATCHET = 1.0
+
+    def test_golden_is_still_perfect(self):
+        scored = mr.score_retrieval(GOLDEN)
+        self.assertGreaterEqual(scored["precision"], self.FULL_RATCHET, f"golden precision 退步：{scored}")
+        self.assertGreaterEqual(scored["recall"], self.FULL_RATCHET, f"golden recall 退步：{scored}")
+
+    def test_v1_holdout_is_still_perfect(self):
+        scored = mr.score_retrieval(HOLDOUT_GOLDEN)
+        self.assertGreaterEqual(scored["precision"], self.FULL_RATCHET, f"v1 precision 退步：{scored}")
+        self.assertGreaterEqual(scored["recall"], self.FULL_RATCHET, f"v1 recall 退步：{scored}")
+
+    def test_all_three_corpora_are_scored_by_the_same_rank_function(self):
+        """三集必须走同一个 rank()，否则棘轮之间不可比、消融也无法对照。
+
+        判据是**调用计数**而不是「函数对象相等」：初版写的 _ranker_of() 无条件
+        return mr.rank，assertIs 恒真，属零判别力（与 H2 被审查者证伪的那条断言
+        同类），自查时抓出来重写。现在数的是 rank() 实际被调用了几次——把 mr.rank
+        换成哨兵之后，三集各自必须触发「与语料对数相同」的调用次数。任何一集被
+        悄悄换成别的排序器，对应那条计数就会红。
+
+        注意 score_holdout_v2 的 ranker 是**默认参数**，在 def 执行时就绑定了当时
+        的 mr.rank；patch 之后默认值仍指向原函数，所以这里显式传 ranker=mr.rank，
+        读的是 patch 生效后的模块属性。这个绑定语义也正是
+        test_scorer_is_ranker_agnostic_so_ablation_stays_comparable 存在的原因：
+        消融时显式注入被削弱的排序器，计分口径保持不变。
+        """
+        calls: list[int] = []
+        real_rank = mr.rank
+
+        def sentinel(query, candidates):
+            calls.append(1)
+            return real_rank(query, candidates)
+
+        with mock.patch.object(mr, "rank", sentinel):
+            mr.score_retrieval(GOLDEN)
+            golden_calls = len(calls)
+            mr.score_retrieval(HOLDOUT_GOLDEN)
+            v1_calls = len(calls) - golden_calls
+            score_holdout_v2(HOLDOUT_V2, ranker=mr.rank)
+            v2_calls = len(calls) - golden_calls - v1_calls
+
+        self.assertEqual(golden_calls, len(GOLDEN), "golden 每对必须恰好调用一次 rank()")
+        self.assertEqual(v1_calls, len(HOLDOUT_GOLDEN), "v1 每对必须恰好调用一次 rank()")
+        # v2 的 stored 为空那对按口径 2 **不调用** ranker（score_holdout_v2 里是
+        # `ranker(query, stored) if stored else []`），期望值必须扣掉它，否则这条
+        # 断言会把「按口径跳过」误判成「少跑了一对」——第一次跑就是这么红的（31!=32）。
+        # 扣减项取 V2_STORED_LENGTH_DIST[0] 而不是硬写 1，是为了让「空 stored 的对数」
+        # 与语料结构统计互相钉住：任何一边漂移都会红。
+        v2_expected = len(HOLDOUT_V2) - V2_STORED_LENGTH_DIST[0]
+        self.assertEqual(
+            v2_calls, v2_expected,
+            "v2 里只有 stored 为空的对可以不调用 rank()（口径 2）；调用次数与"
+            "「有候选可排的对数」不符，说明跳过条件被放宽或收紧了",
+        )
 
 
 # 复核「口径先于分数」的命令（在仓库根目录执行）：
