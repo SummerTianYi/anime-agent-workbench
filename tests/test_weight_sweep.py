@@ -17,11 +17,14 @@ from __future__ import annotations
 import math
 import unittest
 from collections import Counter
+from pathlib import Path
 from unittest import mock
 
 import report_weight_robustness as rw
 import test_holdout_v2 as hv2
 from src import memory_ranker as mr
+
+REPO = Path(__file__).resolve().parents[1]
 
 # 棘轮常量现读而不重写。用模块限定名而不把测试类绑到本模块的命名空间里：
 # unittest 的 discover 会把模块里任何 TestCase 子类当成自己的用例，所以不管叫
@@ -190,6 +193,35 @@ class SecondaryMetricTests(unittest.TestCase):
     def test_breadth_counts_distinct_lost_pairs_across_corpora(self):
         found = self.summary([], {"v2": [7, 7, 23], "v1": [6]})
         self.assertEqual(rw.distinct_lost_pairs(found), 3, msg="#7 被翻两次只算一对")
+
+
+class DecisionLockTests(unittest.TestCase):
+    """N10 决策落地（驳回）：本轮扫过 6 + 5 个候选值，四个权重一个都没改。
+
+    锁的是决策的**结果**而不是决策的理由。理由（完整扫描表、诱惑与拒绝、两条自报的
+    判据缺陷）在 commit 正文与 analysis.md 里，那是历史，不该被断言钉死；而「当前发
+    运的权重就是被扫过并确认保留的那一组」是活的不变量：任何人（包括下一轮的我）改
+    动它都会先让这条断言红，红了他就知道有一个已闭合的判据需要先重新登记。
+    """
+
+    def test_the_scanned_and_retained_weights_are_the_shipped_ones(self):
+        self.assertEqual(mr.W_PREFERENCE, 0.10, msg="N10 已驳回调它；要改先重新登记判据")
+        self.assertEqual(mr.W_BIGRAM, 0.30, msg="N10 已驳回调它；要改先重新登记判据")
+        self.assertEqual(mr.W_CONCEPT, 0.55)
+        self.assertEqual(mr.W_TRANSIENT, 0.35)
+
+    def test_the_scanned_dimensions_stay_anchored_in_the_candidate_tables(self):
+        """扫过的两个维度必须留在候选表里，否则「已扫过」这件事失去参照点。"""
+        self.assertIn(mr.W_PREFERENCE, rw.CANDIDATES["pre"][1])
+        self.assertIn(mr.W_BIGRAM, rw.CANDIDATES["big"][1])
+
+    def test_the_ranker_source_carries_the_negative_result_next_to_the_constants(self):
+        """只写在 evidence 文档里的约束，改代码的人不会看见，所以注释也要记这次驳回。"""
+        lines = (REPO / "src" / "memory_ranker.py").read_text(encoding="utf-8").split("\n")
+        at = next(i for i, line in enumerate(lines) if line.startswith("W_BIGRAM = "))
+        above = "\n".join(lines[max(0, at - 16):at])
+        self.assertIn("N10", above, msg="权重常量正上方必须记着 N10 的驳回结论")
+        self.assertIn("重新登记判据", above, msg="必须写清改这四个值的前置条件")
 
 
 if __name__ == "__main__":
