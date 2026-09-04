@@ -1,0 +1,146 @@
+================================================================================================
+提交前手工扫描记录（第 6 步）
+generated : 2026-09-04 17:32:05 +0100
+================================================================================================
+为什么必须手工扫：g0_environment 与 g0_secrets 的 SCAN_DIRS **不含 evidence/**，
+SCAN_SUFFIXES **不含 .log**。也就是说，即使某个 evidence 文件泄漏了机器绝对
+路径或一枚凭据，这两个闸门也照样报 PASS。本扫描是那条盲区的补偿控制，
+在提交前手工跑一遍。
+
+为什么探针用 ID 而不用字面样式串：如果把字面串印进本报告，本报告自己就会
+命中它们。这不是假想——本证据集里有一份文档真犯过这个错（为了解释消毒而把
+一个路径前缀字面引了一遍，结果泄漏探针自己命中 1 处）。用 ID + 语义描述，
+报告就能被同一组探针扫、包括扫它自己。
+
+扫描范围：evidence/ 下本轮要提交的全部文件，tracked 与 untracked 都算。
+**排除 1 个**：Sarah 并行修改中的那一份（本轮禁读禁写禁 add，不纳入任何
+统计，由最终 push 前检查单独扫）。evidence/run_*.json 被 .gitignore 忽略、
+不提交，因此也不在扫描范围内（它们不含路径与凭据，是闸门输出的 JSON 快照）。
+
+目标文件数 = 23
+    evidence/README.md
+    evidence/task_b_after_drill.log
+    evidence/task_b_drill_attribution.log
+    evidence/task_b_final_check.log
+    evidence/task_b_final_selfcheck.md
+    evidence/task_b_gate_matrix.md
+    evidence/task_b_gate_snapshot_before.md
+    evidence/task_b_integration.md
+    evidence/task_b_retrieval_analysis.md
+    evidence/task_b_round1_normal.log
+    evidence/task_b_round1_strict.log
+    evidence/task_b_round1_unittest.log
+    evidence/task_b_round2_normal.log
+    evidence/task_b_round2_strict.log
+    evidence/task_b_round2_unittest.log
+    evidence/task_b_round3_normal.log
+    evidence/task_b_round3_strict.log
+    evidence/task_b_round3_unittest.log
+    evidence/task_b_sabotage_drill.log
+    evidence/task_b_sabotage_drill.md
+    evidence/task_b_scan_report.log
+    evidence/task_b_self_sabotage.log
+    evidence/task_b_self_sabotage.md
+
+================================================================================================
+1. 探针清单（ID / 类别 / 语义）
+================================================================================================
+  P01  [路径]  用户家目录前缀（本机真实值，macOS 风格）
+  P02  [路径]  Linux 家目录前缀
+  P03  [路径]  Windows 盘符，反斜杠写法（C 与 D）
+  P04  [路径]  Windows 盘符，正斜杠写法
+  P05  [路径]  macOS 每用户临时目录前缀
+  P06  [路径]  系统临时目录前缀（真实值，非 <tmp> 记号）
+  P07  [路径]  本地登录名（带词边界，避开 macOS 这类合法提及）
+  P08  [路径]  仓库绝对路径（应已被 <repo> 记号替换）
+  P09  [密钥]  常见厂商 API key 前缀（两种样式）
+  P10  [密钥]  赋值形式的凭据关键字（api_key / token / secret / passwd）
+  P11  [密钥]  HTTP 授权头关键字
+  P12  [密钥]  GitHub PAT 前缀样式（两种）
+  P13  [密钥]  GitLab PAT 前缀样式
+  P14  [密钥]  PEM 私钥块头
+  P15  [密钥]  AWS access key id 样式
+  P16  [密钥]  连接串里内嵌用户名与密码的形态（scheme 分隔符 + 冒号 + at 符号）
+  P17  [身份]  上游 author 的 email 地址（个人邮箱，无必要抄进证据）
+  P18  [哈希]  40 位十六进制串总数（应全部是带标签的 blob/tree/sha256 锚点）
+  P19  [哈希]  7 位短 hash 样式且前面没有反引号或标签（裸 commit hash 嫌疑）
+
+  另：P09–P16 是 g0_secrets.py 自带正则的**超集**（该闸门本身的正则也覆盖了，
+  但它的 SCAN_DIRS 看不到 evidence/，所以在这里重跑一遍）。
+
+================================================================================================
+2. 逐文件 × 逐探针命中数
+================================================================================================
+  file                                            P01  P02  P03  P04  P05  P06  P07  P08  P09  P10  P11  P12  P13  P14  P15  P16  P17  P18  P19   TOTAL
+  -----------------------------------------------------------------------------------------------------------------------------------------------------
+  README.md                                         0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0       0
+  task_b_after_drill.log                            0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    2    5       7
+  task_b_drill_attribution.log                      0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    2    0       2
+  task_b_final_check.log                            0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0   17    1      18
+  task_b_final_selfcheck.md                         0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0   18    3      21
+  task_b_gate_matrix.md                             0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    2    0       2
+  task_b_gate_snapshot_before.md                    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0   12    7      19
+  task_b_integration.md                             0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0       0
+  task_b_retrieval_analysis.md                      0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0       0
+  task_b_round1_normal.log                          0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    1    0       1
+  task_b_round1_strict.log                          0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    1    0       1
+  task_b_round1_unittest.log                        0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    1    0       1
+  task_b_round2_normal.log                          0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    1    0       1
+  task_b_round2_strict.log                          0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    1    0       1
+  task_b_round2_unittest.log                        0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    1    0       1
+  task_b_round3_normal.log                          0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    1    0       1
+  task_b_round3_strict.log                          0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    1    0       1
+  task_b_round3_unittest.log                        0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    1    0       1
+  task_b_sabotage_drill.log                         0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    2    0       2
+  task_b_sabotage_drill.md                          0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    8    2      10
+  task_b_scan_report.log                            0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0       0
+  task_b_self_sabotage.log                          0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0   40    0      40
+  task_b_self_sabotage.md                           0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0   21    0      21
+  -----------------------------------------------------------------------------------------------------------------------------------------------------
+  TOTAL                                             0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0  133   18     151
+
+================================================================================================
+3. 判定
+================================================================================================
+  泄漏类探针（P01–P17）合计命中 = 0
+  => 泄漏类全部为 0 : True
+
+  信息类探针 P18（40 位十六进制串总数） = 133
+  信息类探针 P19（裸 7 位短 hash 嫌疑）  = 18
+  这两条不是泄漏，是**可读性核查**：本轮所有 commit hash 都会在 author 改写后
+  失效，所以每个 hash 都必须带标签（说明它是 blob / tree / sha256 / commit）
+  并配有那句显式标注。P19 的命中需要逐个人工确认它出现在带标签的表格里，
+  而不是散在正文里当定位用。逐条确认结果见第 4 节。
+
+================================================================================================
+4. P19 命中处的逐条上下文（人工确认它们是带标签的，不是裸定位）
+================================================================================================
+  说明：下面每行里的 hash 令牌本身已用 <7hex> / <40hex> 记号替换，file:line 保持
+  原样。替换的理由与探针字面串不入报告是同一条：若把令牌原样抄进本报告，本报告
+  就会命中自己的第 4 节，下一轮又会把这些命中再抄一遍，计数永不收敛、不存在
+  不动点。替换之后本报告在同一组探针下自洁，重跑两次的差别只有时间戳。
+  要看令牌原文，按 file:line 打开对应文件的那一行即可。
+  task_b_after_drill.log:165: 干净值 '<7hex>'。三个变体的差别只在破坏是否改变文件长度、以及各步落在哪一秒。
+  task_b_after_drill.log:171: 新解释器读到 : '<7hex>'
+  task_b_after_drill.log:179: 新解释器读到 : '<7hex>'   （磁盘源码是 '<7hex>'）
+  task_b_after_drill.log:191: 新解释器读到 : '<7hex>'
+  task_b_final_check.log:28: HEAD                        = <40hex>  (短 <7hex>)
+  task_b_final_selfcheck.md:101: <7hex> SummerTianYi fix: regenerate frozen MANIFEST (CRLF bootstrap drift) + force LF via .gitattributes
+  task_b_final_selfcheck.md:102: <7hex> SummerTianYi feat: workbench bootstrap - task packs, acceptance gates, evidence system
+  task_b_final_selfcheck.md:105: <7hex> SummerTianYi fix: regenerate frozen MANIFEST (CRLF bootstrap drift) + force LF via .gitattributes
+  task_b_gate_snapshot_before.md:352: <7hex> docs(memory): 补检索难度分析、留出集结果与主仓集成说明
+  task_b_gate_snapshot_before.md:353: <7hex> feat(memory): MemoryStore 增补按查询排序的召回与 prompt 片段格式化
+  task_b_gate_snapshot_before.md:354: <7hex> feat(memory): score_retrieval 落地宏平均查准查全评测
+  task_b_gate_snapshot_before.md:355: <7hex> feat(memory): 补偏好断言加权与临时状态降权
+  task_b_gate_snapshot_before.md:356: <7hex> feat(memory): 补概念词典桥接，让无字面重叠的查询能命中
+  task_b_gate_snapshot_before.md:357: <7hex> feat(memory): 补检索文本归一化与字符 bigram 相似度
+  task_b_gate_snapshot_before.md:358: <7hex> feat: workbench bootstrap - task packs, acceptance gates, evidence system
+  task_b_sabotage_drill.md:429: | 5 | 残留风险有两类，都已实测复现 | **V2**：等长破坏 + 同秒还原 → mtime/size 双 MATCH → 新解释器读到破坏态字面量 `'<7hex>'` 而磁盘源码是干净的 `'<7hex>'` → **毒码被加载**。**V3**：等长破坏且与干净编译落在同一整秒 → 磁盘
+  P19 命中行总数 = 16
+  人工判读标准（本节不预先下结论，逐条看完上面才能判）：
+    合格 = 该行属于 `git log` 清单、锚点表格、或「旧 hash → 新 hash」对照表，
+           即 hash 旁边带 subject / 序数 / 标签，且所在文档开头有那句
+           「author 改写后 commit hash 全部失效」的显式标注。
+    不合格 = 短 hash 被当唯一定位手段散写在正文里（改写后会成死引用）。
+  逐条判读结果写在 evidence/task_b_final_selfcheck.md 第 7 节，不写在本报告里：
+  本报告只出计数与原文位置，判读是人的动作，落点应该在文档而不是生成器里。

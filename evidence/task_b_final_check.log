@@ -1,0 +1,393 @@
+================================================================================================
+任务 B 收尾自证日志（第 7 步的**提交前**一半，记作 7a）
+generated : 2026-09-04 17:04:02 +0100
+================================================================================================
+消毒规则：本文件不出现机器绝对路径。仓库根记作 <repo>，仓库外临时目录记作
+<scratch>，用户家目录前缀记作 <home>。实质数值（指标、哈希、退出码、时间戳、
+用例数、行数）逐字来自命令输出，一处未改；所有时间戳由 `date` 生成，所有行数
+由 `wc -l` 生成，无一处手抄。
+
+【关于 commit hash 的显式标注】本文件里出现的 commit hash 是 author 改写**前**的值。
+push 前全部本地 commit 的 author 会被改写，改写后所有 commit hash 全部失效。
+长期有效的稳定锚点是 **blob 哈希与 tree 哈希**，以及 commit 的 **subject + 序数**：
+author 改写不动 tree 也不动 blob，这两类哈希在改写前后逐字不变。复核时请勿拿本文件
+里的 commit hash 去 `git show`，那会打不到东西、并误判成证据造假。
+
+为什么这份日志只有 7a：任务书第 7 步要求的「git status 空、最终 commit 数、
+逐文件行数与 blob 哈希清单」都是**提交之后**才存在的状态，而本文件自己要在
+第 6 步被提交，无法记录自己被提交之后的世界——这是自指的必然结果，不是遗漏。
+那一半记作 7b，在 evidence/task_b_blob_manifest.md（最后提交）与交付报告中给出。
+
+7a 的价值恰恰在于它**先于**提交：它证明「往仓库里加 evidence 文件」这件事
+本身不会扰动任何一个闸门。7b 会在提交后复跑一遍 8 闸门，两份逐格比对。
+
+================================================================================================
+A. git 状态
+================================================================================================
+timestamp : 2026-09-04 17:04:02 +0100
+  HEAD                        = d6868c654a821abf7920d249683837db6068a87a  (短 d6868c6)
+  HEAD^{tree}（稳定锚点）    = 37d26de723f1571ec3c6aa0cced25f2794eece68
+  behind origin/main          = 0
+  ahead  origin/main          = 39
+  tracked 工作区状态（-uno）  = ''
+  untracked 总数              = 20
+  其中 Sarah 并行修改中的     = 1（evidence/task_b_gate_objections.md，本轮禁读禁写禁 add，
+                                不纳入任何统计，由最终 push 前检查单独扫）
+  本轮我拥有的 untracked      = 19
+
+  冻结区逐件 diff（必须全空）：
+    CLEAN  vendor/agent_core/harness.py
+    CLEAN  vendor/agent_core/song_catalog.py
+    CLEAN  vendor/agent_core/voice_text.py
+    CLEAN  vendor/agent_core/data/luotianyi_original_songs.json
+    CLEAN  acceptance/evals/scenarios.json
+  => 冻结区 5 件全部无改动 : True
+
+  冻结区 blob 三方相等性（worktree / HEAD / MANIFEST 期望）：
+    vendor/agent_core/harness.py
+        git hash-object        = 29dca70bcc740976910cd0f85d38f2ce9034795c
+        git rev-parse HEAD:... = 29dca70bcc740976910cd0f85d38f2ce9034795c
+        equal                  = True
+    vendor/agent_core/song_catalog.py
+        git hash-object        = f5b16e8a436b4f9111b6d388fe9c904374b9a8b0
+        git rev-parse HEAD:... = f5b16e8a436b4f9111b6d388fe9c904374b9a8b0
+        equal                  = True
+    vendor/agent_core/voice_text.py
+        git hash-object        = f7fe9267465a4c044e1e1df632cfec1dcca1a593
+        git rev-parse HEAD:... = f7fe9267465a4c044e1e1df632cfec1dcca1a593
+        equal                  = True
+    vendor/agent_core/data/luotianyi_original_songs.json
+        git hash-object        = 426d0fe96116838e202948ce88925d4ca96e27a7
+        git rev-parse HEAD:... = 426d0fe96116838e202948ce88925d4ca96e27a7
+        equal                  = True
+    acceptance/evals/scenarios.json
+        git hash-object        = 53ab5c2bf54027f3e333e0f980259acbe0e72150
+        git rev-parse HEAD:... = 53ab5c2bf54027f3e333e0f980259acbe0e72150
+        equal                  = True
+
+  本地 .git/info/attributes 是否还有临时 CRLF 规则：
+    exists = False
+
+================================================================================================
+B. 冻结件 sha256 与 EOL 残留探针（frozen_check.py 全文）
+================================================================================================
+timestamp : 2026-09-04 17:04:03 +0100
+========================================================================
+1.4  frozen artefact sha256 vs acceptance/MANIFEST.json
+========================================================================
+  MATCH   vendor/agent_core/harness.py
+           manifest=cb1ae928f80674952c4ac6e6385d260a7dbd5cf93ac5ab96889ff6bdb32b2807
+           actual  =cb1ae928f80674952c4ac6e6385d260a7dbd5cf93ac5ab96889ff6bdb32b2807
+  MATCH   vendor/agent_core/song_catalog.py
+           manifest=57d257d1084a67271a78a3b79393839c1442d37499c8a25862d80071a411e49e
+           actual  =57d257d1084a67271a78a3b79393839c1442d37499c8a25862d80071a411e49e
+  MATCH   vendor/agent_core/voice_text.py
+           manifest=c652a1b868029a5f1d46b23e1720af44363081ce441c1ff008bcc86f913e4da8
+           actual  =c652a1b868029a5f1d46b23e1720af44363081ce441c1ff008bcc86f913e4da8
+  MATCH   vendor/agent_core/data/luotianyi_original_songs.json
+           manifest=22552757d32c86e1bf9d52217c3c3ff588bd35a86ba1ceada6707198f2710f8d
+           actual  =22552757d32c86e1bf9d52217c3c3ff588bd35a86ba1ceada6707198f2710f8d
+  MATCH   acceptance/evals/scenarios.json
+           manifest=2c5dab3fc5e414680193c7b998bb62cf9fe3c6299f2f002682a75efa8179b00e
+           actual  =2c5dab3fc5e414680193c7b998bb62cf9fe3c6299f2f002682a75efa8179b00e
+
+  RESULT: 5/5 match
+
+========================================================================
+1.5  residual EOL translation probe on acceptance/evals/scenarios.json
+========================================================================
+  .git/info/attributes does NOT exist
+
+  git ls-files --eol acceptance/evals/scenarios.json  (exit=0)
+      i/lf    w/lf    attr/text=auto eol=lf 	acceptance/evals/scenarios.json
+
+  git check-attr -a acceptance/evals/scenarios.json  (exit=0)
+      acceptance/evals/scenarios.json: text: auto
+      acceptance/evals/scenarios.json: eol: lf
+
+  worktree bytes      = 2752
+  worktree CR count   = 0
+  worktree LF count   = 118
+  worktree sha256     = 2c5dab3fc5e414680193c7b998bb62cf9fe3c6299f2f002682a75efa8179b00e
+
+  git hash-object              = 53ab5c2bf54027f3e333e0f980259acbe0e72150
+  git hash-object --no-filters = 53ab5c2bf54027f3e333e0f980259acbe0e72150
+  git rev-parse HEAD:acceptance/evals/scenarios.json    = 53ab5c2bf54027f3e333e0f980259acbe0e72150
+  all three equal              = True
+
+  bytes == 2752                = True  (actual 2752)
+  sha256 == expected           = True
+  CR count == 0                = True
+
+========================================================================
+  1.4 frozen sha256 : PASS  (5/5)
+  1.5 eol residue   : PASS
+========================================================================
+===EXIT=0===
+
+================================================================================================
+C. 8 个闸门逐个复跑 + 与起点逐格比对
+================================================================================================
+timestamp : 2026-09-04 17:04:03 +0100
+
+------------------------------------------------------------------------------------------------
+GATE g0_environment   exit=0 (PASS)   elapsed=0.04s
+  cmd: ./.venv/bin/python acceptance/gates/g0_environment.py
+------------------------------------------------------------------------------------------------
+--- stdout ---
+G0_ENVIRONMENT: PASS
+--- stderr ---
+(empty)
+
+------------------------------------------------------------------------------------------------
+GATE g0_secrets   exit=0 (PASS)   elapsed=0.03s
+  cmd: ./.venv/bin/python acceptance/gates/g0_secrets.py
+------------------------------------------------------------------------------------------------
+--- stdout ---
+G0_SECRETS: PASS
+--- stderr ---
+(empty)
+
+------------------------------------------------------------------------------------------------
+GATE g0_freeze   exit=0 (PASS)   elapsed=0.03s
+  cmd: ./.venv/bin/python acceptance/gates/g0_freeze.py
+------------------------------------------------------------------------------------------------
+--- stdout ---
+G0_FREEZE: PASS
+--- stderr ---
+(empty)
+
+------------------------------------------------------------------------------------------------
+GATE g1_contract   exit=0 (PASS)   elapsed=0.08s
+  cmd: ./.venv/bin/python acceptance/gates/g1_contract.py
+------------------------------------------------------------------------------------------------
+--- stdout ---
+G1_CONTRACT: PASS
+--- stderr ---
+(empty)
+
+------------------------------------------------------------------------------------------------
+GATE g1_memory   exit=0 (PASS)   elapsed=0.05s
+  cmd: ./.venv/bin/python acceptance/gates/g1_memory.py
+------------------------------------------------------------------------------------------------
+--- stdout ---
+G1_MEMORY: PASS
+--- stderr ---
+(empty)
+
+------------------------------------------------------------------------------------------------
+GATE g1_permissions   exit=2 (PENDING)   elapsed=0.03s
+  cmd: ./.venv/bin/python acceptance/gates/g1_permissions.py
+------------------------------------------------------------------------------------------------
+--- stdout ---
+evaluate() not implemented (Task C)
+G1_PERMISSIONS: PENDING
+--- stderr ---
+(empty)
+
+------------------------------------------------------------------------------------------------
+GATE g1_tools   exit=2 (PENDING)   elapsed=0.04s
+  cmd: ./.venv/bin/python acceptance/gates/g1_tools.py
+------------------------------------------------------------------------------------------------
+--- stdout ---
+openai_schema/execute not implemented (Task E)
+G1_TOOLS: PENDING
+--- stderr ---
+(empty)
+
+------------------------------------------------------------------------------------------------
+GATE g3_simulate   exit=0 (PASS)   elapsed=0.06s
+  cmd: ./.venv/bin/python acceptance/gates/g3_simulate.py
+------------------------------------------------------------------------------------------------
+--- stdout ---
+G3_SIMULATE: PASS
+--- stderr ---
+(empty)
+
+================================================================================================
+C.1  逐格比对：收尾 vs 起点（起点 = snap_step1_baseline.txt, 2026-09-04 10:55:16）
+================================================================================================
+  gate                   起点     收尾     一致   verdict
+  g0_environment          0      0   True   PASS
+  g0_secrets              0      0   True   PASS
+  g0_freeze               0      0   True   PASS
+  g1_contract             0      0   True   PASS
+  g1_memory               0      0   True   PASS
+  g1_permissions          2      2   True   PENDING
+  g1_tools                2      2   True   PENDING
+  g3_simulate             0      0   True   PASS
+  TOTAL: PASS=6 FAIL=0 PENDING=2  (of 8)
+  => 8 格全部与起点一致 : True
+  => 与期望矩阵 0/0/0/0/0/2/2/0 一致 : True
+
+================================================================================================
+D. 单元测试全量（unittest discover -s tests -p "test_*.py" -t tests）
+================================================================================================
+timestamp : 2026-09-04 17:04:03 +0100
+  注意：-t tests 是必需的。用 -t . 会报 ImportError: Start directory is not importable
+--- full combined stdout+stderr, verbatim (tail 40) ---
+..............................................................................................................................................................................................................................................................
+----------------------------------------------------------------------
+Ran 254 tests in 0.165s
+
+OK
+===EXIT=0===
+  elapsed = 0.271s
+  Ran 行  = ['Ran 254 tests in 0.165s']
+  OK 行   = ['OK']
+
+================================================================================================
+E. run_all.py 双模式（两次调用之间 sleep 3）
+================================================================================================
+  为什么必须 sleep 3：run_all.py 第 59 行用 time.strftime('%Y%m%d_%H%M%S')
+  给 evidence JSON 命名，只到秒级；同一秒内两次调用会静默互相覆盖，
+  上一轮因此丢过一份 JSON。本轮每次调用前后都对 evidence/run_*.json 做快照，
+  以便把确切产物文件名交叉索引出来。
+
+------------------------------------------------------------------------------------------------
+E.normal  cmd: ./.venv/bin/python acceptance/run_all.py
+------------------------------------------------------------------------------------------------
+  sleep 3 before invocation at 2026-09-04 17:04:03 +0100
+PASS     g0_environment
+         G0_ENVIRONMENT: PASS
+PASS     g0_secrets
+         G0_SECRETS: PASS
+PASS     g0_freeze
+         G0_FREEZE: PASS
+PASS     g1_contract
+         G1_CONTRACT: PASS
+PASS     g1_memory
+         G1_MEMORY: PASS
+PENDING  g1_permissions
+         evaluate() not implemented (Task C)
+         G1_PERMISSIONS: PENDING
+PENDING  g1_tools
+         openai_schema/execute not implemented (Task E)
+         G1_TOOLS: PENDING
+PASS     g3_simulate
+         G3_SIMULATE: PASS
+evidence: evidence/run_20260904_170407.json
+VERDICT: PENDING-OK
+===EXIT=0===
+  elapsed = 0.367s
+  evidence/run_*.json before = 58 file(s)
+  evidence/run_*.json after  = 59 file(s)
+  newly created              = ['run_20260904_170407.json']
+  timestamp after invocation = 2026-09-04 17:04:07 +0100
+
+------------------------------------------------------------------------------------------------
+E.strict  cmd: ./.venv/bin/python acceptance/run_all.py --strict
+------------------------------------------------------------------------------------------------
+  sleep 3 before invocation at 2026-09-04 17:04:07 +0100
+PASS     g0_environment
+         G0_ENVIRONMENT: PASS
+PASS     g0_secrets
+         G0_SECRETS: PASS
+PASS     g0_freeze
+         G0_FREEZE: PASS
+PASS     g1_contract
+         G1_CONTRACT: PASS
+PASS     g1_memory
+         G1_MEMORY: PASS
+PENDING  g1_permissions
+         evaluate() not implemented (Task C)
+         G1_PERMISSIONS: PENDING
+PENDING  g1_tools
+         openai_schema/execute not implemented (Task E)
+         G1_TOOLS: PENDING
+PASS     g3_simulate
+         G3_SIMULATE: PASS
+evidence: evidence/run_20260904_170410.json
+VERDICT: BLOCKED
+===EXIT=1===
+  elapsed = 0.381s
+  evidence/run_*.json before = 59 file(s)
+  evidence/run_*.json after  = 60 file(s)
+  newly created              = ['run_20260904_170410.json']
+  timestamp after invocation = 2026-09-04 17:04:10 +0100
+
+================================================================================================
+F. report_retrieval.py 全六种模式
+================================================================================================
+  任务书起点要求的是「四模式」。起点那四次的逐模式输出没有落盘（只有 8 闸门
+  快照 snap_step1_baseline.txt 存了下来），所以这里跑**全部六种模式**，是四模式
+  的超集，不会因为选错子集而漏掉起点跑过的那几个。比对基准改用可独立复核的
+  东西：三集指标（golden 8/8、v1 12/12、v2 24/32 P=0.7742 R=0.7500），这三个数
+  在 evidence/task_b_self_sabotage.log 的 baseline 行里有独立实现 + 官方计分器
+  双算互验（AGREE <1e-12），本节再算第三次。「起点逐模式输出未落盘」这一点
+  如实记录，不假称做过逐格 diff。
+timestamp : 2026-09-04 17:04:10 +0100
+
+  MODE v2           exit=0  stdout=85 line(s)  stderr=0 line(s)  elapsed=0.09s
+    cmd: ./.venv/bin/python tests/report_retrieval.py v2
+    headline lines (first 12 matching precision/recall/hits/命中):
+      HOLDOUT v2 — 逐对命中明细（top-1，口径见 tests/test_holdout_v2.py docstring）
+      宏平均 precision = 0.7742  (n=31)
+      宏平均 recall    = 0.7500  (n=30)
+      dim   pairs  hits  miss  hit-rate  失败对编号
+      可判定对（relevant 非空）= 30，命中 = 24，未命中 = 6
+      未命中对的 top-1 与正确答案对照（诊断用）：
+
+  MODE diagnose     exit=0  stdout=83 line(s)  stderr=0 line(s)  elapsed=0.09s
+    cmd: ./.venv/bin/python tests/report_retrieval.py diagnose
+    headline lines (first 12 matching precision/recall/hits/命中):
+      分层贡献归因：未命中对的 top-1 干扰项 vs 正确答案，四层加权贡献逐项对照
+           query 侧: stable=False polarity=1 concept_hits={'颜色': 0, '城市': 0, '称呼': 0, '生日': 0, '宠物': 0, '过敏': 0, '职业': 0, '爱好': 2}
+                  概念类[爱好] qh=2 fh=3 命中词=['踢球', '运动', '喜欢'] -> member实例
+                  概念类[过敏] qh=0 fh=1 命中词=['羽毛'] -> member实例
+                  概念类[爱好] qh=2 fh=1 命中词=['羽毛球'] -> member实例
+           query 侧: stable=False polarity=0 concept_hits={'颜色': 0, '城市': 0, '称呼': 0, '生日': 0, '宠物': 0, '过敏': 0, '职业': 0, '爱好': 0}
+                  概念类[职业] qh=0 fh=1 命中词=['程序员'] -> member实例
+           query 侧: stable=False polarity=0 concept_hits={'颜色': 0, '城市': 0, '称呼': 0, '生日': 0, '宠物': 0, '过敏': 0, '职业': 0, '爱好': 0}
+           query 侧: stable=True polarity=1 concept_hits={'颜色': 0, '城市': 0, '称呼': 0, '生日': 0, '宠物': 0, '过敏': 0, '职业': 0, '爱好': 1}
+                  概念类[颜色] qh=0 fh=1 命中词=['银'] -> member实例
+                  概念类[职业] qh=0 fh=1 命中词=['上班'] -> member实例
+                  概念类[爱好] qh=1 fh=0 命中词=[] -> head自匹配
+
+  MODE ablation     exit=0  stdout=38 line(s)  stderr=0 line(s)  elapsed=0.14s
+    cmd: ./.venv/bin/python tests/report_retrieval.py ablation
+    headline lines (first 12 matching precision/recall/hits/命中):
+      逐层消融：kill 各层后在 golden / v1 / v2 三集上的命中数与判定翻转
+                         hits  flips  margin(all)   hits  flips  margin(all)   hits  flips  margin(all)
+      各层的「命中对最小分差」（M15 口径）与其 owner 对编号
+      是**命中对**的最小分差，量「一个已正确的判定离翻转有多远」——M15 关心的是后者。
+
+  MODE sensitivity  exit=0  stdout=167 line(s)  stderr=0 line(s)  elapsed=1.01s
+    cmd: ./.venv/bin/python tests/report_retrieval.py sensitivity
+    headline lines (first 12 matching precision/recall/hits/命中):
+        golden  hits=  8/8    min_margin(全体)=0.2676(排除2)  min_margin(仅命中对)=0.2676(排除2, 在#7)
+        v1      hits= 12/12   min_margin(全体)=0.0500(排除0)  min_margin(仅命中对)=0.0500(排除0, 在#5)
+        v2      hits= 24/32   min_margin(全体)=0.0039(排除3)  min_margin(仅命中对)=0.0067(排除9, 在#5)
+      两个分差口径分开报的原因：全体最小分差量「哪对最接近随机」，仅命中对的最小
+      config                                 golden         v1         v2                         min_margin(仅命中对)
+      实测最恶劣方向（仅命中对分差）: W_PREFERENCE x0.5  min_margin=0.0014  在 v2 第 7 对
+      造成命中数变化的配置: 0/8（无任何配置改变判定）
+      最恶劣前 5（按仅命中对分差升序）：
+      config                                 golden         v1         v2                         min_margin(仅命中对)
+      实测最恶劣方向（仅命中对分差）: BIGx0.5 CONx0.5 PREx0.5 TRAx0.5  min_margin=0.0033  在 v2 第 5 对
+      造成命中数变化的配置: 0/2（无任何配置改变判定）
+      最恶劣前 5（按仅命中对分差升序）：
+
+  MODE lexicon      exit=0  stdout=52 line(s)  stderr=0 line(s)  elapsed=0.12s
+    cmd: ./.venv/bin/python tests/report_retrieval.py lexicon
+    headline lines (first 12 matching precision/recall/hits/命中):
+      「净」是三个集合计命中数的变化。这一列就是纪律的价签：照失败条目补词能买到
+
+  MODE l2           exit=0  stdout=45 line(s)  stderr=0 line(s)  elapsed=0.14s
+    cmd: ./.venv/bin/python tests/report_retrieval.py l2
+    headline lines (first 12 matching precision/recall/hits/命中):
+      m 是**命中对**的最小分差（M15 的口径）。它塌到 0.0000 意味着「赢的那一对」
+      RC-2 判定依据 二：v2 未命中对在四种口径下的 L2（干扰 / 应答 / 比值）
+
+================================================================================================
+G. 7a 收尾
+================================================================================================
+timestamp : 2026-09-04 17:04:12 +0100
+  HEAD 全程未变              : True  (d6868c654a821abf7920d249683837db6068a87a)
+  HEAD tree 全程未变         : True  (37d26de723f1571ec3c6aa0cced25f2794eece68)
+  tracked 工作区仍然干净     : True  ('')
+  冻结区 5 件全部无改动      : True
+  8 闸门与起点逐格一致       : True
+
+  本文件自身不统计自己的行数（自指），行数由 `wc -l` 在外部取，
+  记入 evidence/task_b_blob_manifest.md 与交付报告。
