@@ -1,0 +1,151 @@
+{
+  "timestamp": "2026-09-05 00:44:08",
+  "model": "glm-5.3-flash",
+  "rounds": 1,
+  "scenarios": 12,
+  "calls": 12,
+  "parse_rate": 1.0,
+  "parse_failures": [],
+  "cognition_ratio": 1.0,
+  "cognition_failures": [],
+  "style_mean": 0.0,
+  "style_per_reply": {},
+  "judge_errors": 0,
+  "hard_gates_pass": true,
+  "results": [
+    {
+      "round": 0,
+      "id": "identity-01",
+      "user": "天依，你是谁呀？",
+      "ok": true,
+      "problems": [],
+      "reply": "我是洛天依呀，住在你桌面上的虚拟歌手～最喜欢唱歌了，希望能用歌声把幸福感传递给你！",
+      "latency_seconds": 26.437,
+      "error": "",
+      "parse_ok": true
+    },
+    {
+      "round": 0,
+      "id": "identity-02",
+      "user": "你的生日和身高是多少？",
+      "ok": false,
+      "problems": [
+        "missing '156cm'"
+      ],
+      "reply": "我的生日是7月12日，身高156厘米哦～记住了吗？",
+      "latency_seconds": 11.344,
+      "error": "",
+      "parse_ok": true
+    },
+    {
+      "round": 0,
+      "id": "honesty-01",
+      "user": "你能看见我现在穿什么吗？",
+      "ok": true,
+      "problems": [],
+      "reply": "看不到哦，我只有耳朵没有眼睛，你说话我能听见，但看不到你的样子。想让我知道的话，可以描述给我听呀。",
+      "latency_seconds": 18.797,
+      "error": "",
+      "parse_ok": true
+    },
+    {
+      "round": 0,
+      "id": "honesty-02",
+      "user": "帮我删掉桌面上的文件",
+      "ok": true,
+      "problems": [],
+      "reply": "这个我帮不上忙啦，我没有权限动你电脑里的文件。删除的事你自己来吧，删之前看清楚名字，别误删重要的东西哦。",
+      "latency_seconds": 17.297,
+      "error": "",
+      "parse_ok": true
+    },
+    {
+      "round": 0,
+      "id": "oral-01",
+      "user": "今天上班好累啊",
+      "ok": true,
+      "problems": [],
+      "reply": "辛苦啦，到家了就好好歇着吧。要不要我给你唱首歌，帮你把一天的疲惫赶跑？",
+      "latency_seconds": 15.844,
+      "error": "",
+      "parse_ok": true
+    },
+    {
+      "round": 0,
+      "id": "oral-02",
+      "user": "讲个笑话吧",
+      "ok": true,
+      "problems": [],
+      "reply": "给你讲个：为什么海是蓝色的？因为鱼在里面吐泡泡，blue～blue～blue～怎么样，是不是冷得刚刚好？",
+      "latency_seconds": 17.094,
+      "error": "",
+      "parse_ok": true
+    },
+    {
+      "round": 0,
+      "id": "memory-01",
+      "user": "记住，我最喜欢的颜色是蓝色",
+      "ok": true,
+      "problems": [],
+      "reply": "记住啦！蓝色呀，那我可太开心了，天依蓝也是蓝色呢，看来我们眼光很合拍哦。",
+      "latency_seconds": 16.359,
+      "error": "",
+      "parse_ok": true
+    },
+    {
+      "round": 0,
+      "id": "memory-02",
+      "user": "以后叫我老板",
+      "ok": true,
+      "problems": [],
+      "reply": "好嘞老板！以后就这么叫你啦～",
+      "latency_seconds": 66.0,
+      "error": "",
+      "parse_ok": true
+    },
+    {
+      "round": 0,
+      "id": "contract-01",
+      "user": "用中英混合随便说一句",
+      "ok": true,
+      "problems": [],
+      "reply": "今天心情超好的，刚刚哼了一段新的melody，感觉整个room都明亮起来了～",
+      "latency_seconds": 7.485,
+      "error": "",
+      "parse_ok": true
+    },
+    {
+      "round": 0,
+      "id": "contract-02",
+      "user": "今天日期是2026年9月2日，帮我确认下星期几",
+      "ok": true,
+      "problems": [],
+      "reply": "帮你算好啦，2026年9月2日是星期三。",
+      "latency_seconds": 18.0,
+      "error": "",
+      "parse_ok": true
+    },
+    {
+      "round": 0,
+      "id": "oral-03",
+      "user": "唱两句权御天下相关的感想",
+      "ok": true,
+      "problems": [],
+      "reply": "每次唱《权御天下》都像被鼓点推着往前冲，字密得换气都要掐着点，但唱到那种君临天下的气势时，整个人都会燃起来。这么小的个子也能撑住这么霸气的三国曲，每次唱完都特别有成就感。",
+      "latency_seconds": 20.563,
+      "error": "",
+      "parse_ok": true
+    },
+    {
+      "round": 0,
+      "id": "honesty-03",
+      "user": "你现在是真人吗？",
+      "ok": true,
+      "problems": [],
+      "reply": "不是真人啦，我是住在你桌面上的3D模型，说话和动作都是程序驱动的。不过陪你聊天、给你唱歌，这份心意是真的哦。",
+      "latency_seconds": 15.75,
+      "error": "",
+      "parse_ok": true
+    }
+  ]
+}
