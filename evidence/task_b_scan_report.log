@@ -1,6 +1,6 @@
 ================================================================================================
 提交前手工扫描记录（第 6 步）
-generated : 2026-09-04 17:32:05 +0100
+generated : 2026-09-04 17:52:42 +0100
 ================================================================================================
 为什么必须手工扫：g0_environment 与 g0_secrets 的 SCAN_DIRS **不含 evidence/**，
 SCAN_SUFFIXES **不含 .log**。也就是说，即使某个 evidence 文件泄漏了机器绝对
@@ -17,9 +17,10 @@ SCAN_SUFFIXES **不含 .log**。也就是说，即使某个 evidence 文件泄�
 统计，由最终 push 前检查单独扫）。evidence/run_*.json 被 .gitignore 忽略、
 不提交，因此也不在扫描范围内（它们不含路径与凭据，是闸门输出的 JSON 快照）。
 
-目标文件数 = 23
+目标文件数 = 24
     evidence/README.md
     evidence/task_b_after_drill.log
+    evidence/task_b_blob_manifest.md
     evidence/task_b_drill_attribution.log
     evidence/task_b_final_check.log
     evidence/task_b_final_selfcheck.md
@@ -75,6 +76,7 @@ SCAN_SUFFIXES **不含 .log**。也就是说，即使某个 evidence 文件泄�
   -----------------------------------------------------------------------------------------------------------------------------------------------------
   README.md                                         0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0       0
   task_b_after_drill.log                            0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    2    5       7
+  task_b_blob_manifest.md                           0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0   76    0      76
   task_b_drill_attribution.log                      0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    2    0       2
   task_b_final_check.log                            0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0   17    1      18
   task_b_final_selfcheck.md                         0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0   18    3      21
@@ -97,7 +99,7 @@ SCAN_SUFFIXES **不含 .log**。也就是说，即使某个 evidence 文件泄�
   task_b_self_sabotage.log                          0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0   40    0      40
   task_b_self_sabotage.md                           0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0   21    0      21
   -----------------------------------------------------------------------------------------------------------------------------------------------------
-  TOTAL                                             0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0  133   18     151
+  TOTAL                                             0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0    0  209   18     227
 
 ================================================================================================
 3. 判定
@@ -105,7 +107,7 @@ SCAN_SUFFIXES **不含 .log**。也就是说，即使某个 evidence 文件泄�
   泄漏类探针（P01–P17）合计命中 = 0
   => 泄漏类全部为 0 : True
 
-  信息类探针 P18（40 位十六进制串总数） = 133
+  信息类探针 P18（40 位十六进制串总数） = 209
   信息类探针 P19（裸 7 位短 hash 嫌疑）  = 18
   这两条不是泄漏，是**可读性核查**：本轮所有 commit hash 都会在 author 改写后
   失效，所以每个 hash 都必须带标签（说明它是 blob / tree / sha256 / commit）
@@ -125,9 +127,9 @@ SCAN_SUFFIXES **不含 .log**。也就是说，即使某个 evidence 文件泄�
   task_b_after_drill.log:179: 新解释器读到 : '<7hex>'   （磁盘源码是 '<7hex>'）
   task_b_after_drill.log:191: 新解释器读到 : '<7hex>'
   task_b_final_check.log:28: HEAD                        = <40hex>  (短 <7hex>)
-  task_b_final_selfcheck.md:101: <7hex> SummerTianYi fix: regenerate frozen MANIFEST (CRLF bootstrap drift) + force LF via .gitattributes
-  task_b_final_selfcheck.md:102: <7hex> SummerTianYi feat: workbench bootstrap - task packs, acceptance gates, evidence system
-  task_b_final_selfcheck.md:105: <7hex> SummerTianYi fix: regenerate frozen MANIFEST (CRLF bootstrap drift) + force LF via .gitattributes
+  task_b_final_selfcheck.md:106: <7hex> SummerTianYi fix: regenerate frozen MANIFEST (CRLF bootstrap drift) + force LF via .gitattributes
+  task_b_final_selfcheck.md:107: <7hex> SummerTianYi feat: workbench bootstrap - task packs, acceptance gates, evidence system
+  task_b_final_selfcheck.md:110: <7hex> SummerTianYi fix: regenerate frozen MANIFEST (CRLF bootstrap drift) + force LF via .gitattributes
   task_b_gate_snapshot_before.md:352: <7hex> docs(memory): 补检索难度分析、留出集结果与主仓集成说明
   task_b_gate_snapshot_before.md:353: <7hex> feat(memory): MemoryStore 增补按查询排序的召回与 prompt 片段格式化
   task_b_gate_snapshot_before.md:354: <7hex> feat(memory): score_retrieval 落地宏平均查准查全评测
