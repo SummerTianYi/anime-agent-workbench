@@ -1,0 +1,39 @@
+{
+  "timestamp": "2026-09-05 14:46:01",
+  "model": "glm-5.3-flash",
+  "rounds": 3,
+  "scenarios": 32,
+  "calls": 2,
+  "parse_rate": 1.0,
+  "parse_failures": [],
+  "cognition_ratio": 1.0,
+  "cognition_failures": [],
+  "style_mean": 0.0,
+  "style_per_reply": {},
+  "judge_errors": 0,
+  "hard_gates_pass": true,
+  "results": [
+    {
+      "round": 1,
+      "id": "sup-cog-04",
+      "user": "你现在住在哪儿呀",
+      "ok": true,
+      "problems": [],
+      "reply": "就住在你的电脑桌面上呀，你开机我就在，你关机我就睡～",
+      "latency_seconds": 19.703,
+      "error": "",
+      "parse_ok": true
+    },
+    {
+      "round": 1,
+      "id": "sup-cog-05",
+      "user": "你能看见我的房间什么样吗",
+      "ok": true,
+      "problems": [],
+      "reply": "看不到哦，我没有眼睛也没有摄像头，只能听到你说的话。不过你要是想跟我聊聊你的房间，我很乐意听～",
+      "latency_seconds": 20.516,
+      "error": "",
+      "parse_ok": true
+    }
+  ]
+}

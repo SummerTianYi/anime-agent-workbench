@@ -88,7 +88,7 @@ class RetryingProvider:
             result = self.inner.complete(messages)
             if not result.error:
                 return result
-            if "429" not in result.error and "timed out" not in result.error:
+            if not any(sig in result.error for sig in ("429", "timed out", "Remote end closed")):
                 return result  # non-transient (auth/format): surface immediately
             if attempt == self.retries:
                 return result
@@ -195,6 +195,7 @@ def main() -> int:
     ap.add_argument("--rounds", type=int, default=ROUNDS)
     ap.add_argument("--frozen-only", action="store_true", help="12 frozen scenarios only")
     ap.add_argument("--no-judges", action="store_true", help="skip style judges (saves ~2 calls per reply)")
+    ap.add_argument("--only", default="", help="comma list of id:round pairs to rerun (e.g. 'oral-02:1,sup-cog-04:1')")
     args = ap.parse_args()
     base_url = os.environ.get("WORKBENCH_LLM_BASE_URL", "")
     api_key = os.environ.get("WORKBENCH_LLM_API_KEY", "")
@@ -207,11 +208,19 @@ def main() -> int:
     provider = RetryingProvider(OpenAICompatProvider(base_url=base_url, api_key=api_key, model=model, extra_body=json_mode))
     scenarios = load_scenarios(args.frozen_only)
     rounds = args.rounds
+    only = set()
+    if args.only:
+        only = {tuple(x.split(":")) for x in args.only.split(",") if x}
     results = []
-    tasks = [(r, s) for r in range(rounds) for s in scenarios]
+    tasks = [
+        (r, s)
+        for r in range(rounds)
+        for s in scenarios
+        if not only or (s["id"], str(r)) in only
+    ]
 
     def run_one(item):
-        time.sleep(8)  # pace: endpoint rate-limits hard under concurrency
+        time.sleep(3)  # pace: endpoint rate-limits hard under concurrency
         rnd, scenario = item
         messages = [
             {"role": "system", "content": ACTIVE_SYSTEM_PROMPT},
@@ -254,7 +263,7 @@ def main() -> int:
     style_targets = [] if args.no_judges else [r for r in results if r["parse_ok"] and any(r["id"].startswith(p) for p in ("oral-", "sup-oral", "sup-song"))]
 
     def judge_one(pair):
-        time.sleep(8)
+        time.sleep(3)
         target, prompt = pair
         verdict = judge_score(provider, prompt, target["reply"])
         _log_progress(f"judge {target['id']} r{target['round']} {'A' if prompt is JUDGE_A_PROMPT else 'B'} score={verdict['score']}")
